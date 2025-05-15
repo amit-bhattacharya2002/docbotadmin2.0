@@ -1,0 +1,274 @@
+"use client";
+import { useState } from "react";
+import { signOut } from "next-auth/react";
+
+type DepartmentAdminGroup = {
+  departmentId: string;
+  departmentName: string;
+  admins: { id: string; name: string; email: string; adminId: string }[];
+};
+
+type Props = {
+  user: { name?: string; company?: string; email?: string } | undefined;
+  company: { id: string; name: string } | null;
+  departments: { id: string; name: string }[];
+  departmentAdmins: DepartmentAdminGroup[];
+};
+
+export default function SuperAdminDashboardClient({ user, company, departments: initialDepartments, departmentAdmins }: Props) {
+  console.log('SuperAdminDashboardClient user:', user);
+  console.log('SuperAdminDashboardClient company:', company);
+  console.log('SuperAdminDashboardClient departments:', initialDepartments);
+  console.log('departmentAdmins:', departmentAdmins);
+  const [activeTab, setActiveTab] = useState("Departments");
+  const [departments, setDepartments] = useState(initialDepartments);
+  const [newDept, setNewDept] = useState("");
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [adminForm, setAdminForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    adminId: "",
+    departmentId: initialDepartments.length > 0 ? initialDepartments[0].id : "",
+  });
+  const [adminStatus, setAdminStatus] = useState<string | null>(null);
+  const [adminLoading, setAdminLoading] = useState(false);
+
+  const handleAddDepartment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!company) return;
+    if (newDept.trim() && !departments.some(d => d.name === newDept.trim())) {
+      setLoading(true);
+      setStatus(null);
+      const res = await fetch("/api/departments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newDept.trim(), companyId: company.id }),
+      });
+      const data = await res.json();
+      setLoading(false);
+      if (res.ok && data.department) {
+        setDepartments([...departments, data.department]);
+        setNewDept("");
+        setStatus("Department created!");
+      } else {
+        setStatus(data.message || "Failed to create department.");
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    await signOut({ callbackUrl: "/login" });
+    setLoggingOut(false);
+  };
+
+  const handleAdminFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    setAdminForm({ ...adminForm, [e.target.name]: e.target.value });
+  };
+
+  const handleCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminLoading(true);
+    setAdminStatus(null);
+    const res = await fetch("/api/create-department-admin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...adminForm, companyId: company?.id }),
+    });
+    const data = await res.json();
+    setAdminLoading(false);
+    if (res.ok) {
+      setAdminStatus("Department Admin created!");
+      setAdminForm({
+        name: "",
+        email: "",
+        password: "",
+        adminId: "",
+        departmentId: initialDepartments.length > 0 ? initialDepartments[0].id : "",
+      });
+    } else {
+      setAdminStatus(data.message || "Failed to create Department Admin.");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 flex flex-col">
+      {/* Header */}
+      <header className="flex items-center justify-between px-8 py-4 bg-white/10 backdrop-blur-lg border-b border-white/20">
+        <div className="flex items-center gap-2 text-white text-2xl font-bold">
+          <span>{company?.name || "Company"}</span>
+          <span className="text-blue-400 font-semibold">docBot Admin</span>
+        </div>
+        <div className="relative">
+          <button
+            className="flex items-center gap-2 px-4 py-2 bg-white/20 rounded-lg text-white hover:bg-white/30 focus:outline-none"
+            onClick={() => setDropdownOpen((open) => !open)}
+          >
+            <span>{user?.name || "User"}</span>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          {dropdownOpen && (
+            <div className="absolute right-0 mt-2 w-40 bg-white/90 rounded-lg shadow-lg z-10">
+              <div className="px-4 py-2 text-gray-800 border-b">{user?.name || "User"}</div>
+              <button
+                className="w-full px-4 py-2 text-left text-red-600 hover:bg-gray-100 rounded-b-lg disabled:opacity-60"
+                onClick={handleLogout}
+                disabled={loggingOut}
+              >
+                {loggingOut ? "Logging out..." : "Logout"}
+              </button>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* Tabs */}
+      <div className="flex flex-col items-center mt-8">
+        <div className="flex gap-4 mb-6">
+          <button
+            className={`px-6 py-2 rounded-t-lg font-semibold text-lg transition-colors ${activeTab === "Departments" ? "bg-blue-600 text-white" : "bg-white/20 text-white hover:bg-blue-500/30"}`}
+            onClick={() => setActiveTab("Departments")}
+          >
+            Departments
+          </button>
+          <button
+            className={`px-6 py-2 rounded-t-lg font-semibold text-lg transition-colors ${activeTab === "Department Admins" ? "bg-blue-600 text-white" : "bg-white/20 text-white hover:bg-blue-500/30"}`}
+            onClick={() => setActiveTab("Department Admins")}
+          >
+            Department Admins
+          </button>
+        </div>
+
+        {/* Tab Panels */}
+        <div className="w-full max-w-4xl bg-white/10 rounded-b-2xl shadow-xl p-8 border border-white/20">
+          {activeTab === "Departments" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Department List */}
+              <div>
+                <h3 className="text-xl font-bold text-white mb-4">All Departments</h3>
+                <ul className="space-y-2">
+                  {departments.map((dept) => (
+                    <li key={dept.id} className="bg-white/20 text-white px-4 py-2 rounded-lg">{dept.name}</li>
+                  ))}
+                </ul>
+              </div>
+              {/* Add Department Form */}
+              <div>
+                <h3 className="text-xl font-bold text-white mb-4">Create New Department</h3>
+                <form onSubmit={handleAddDepartment} className="flex flex-col gap-4">
+                  <input
+                    className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Department Name"
+                    value={newDept}
+                    onChange={(e) => setNewDept(e.target.value)}
+                    required
+                  />
+                  <button
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors"
+                    disabled={loading}
+                  >
+                    {loading ? "Adding..." : "Add Department"}
+                  </button>
+                  {status && <div className="text-white text-sm mt-2">{status}</div>}
+                </form>
+              </div>
+            </div>
+          )}
+          {activeTab === "Department Admins" && (
+            <div className="flex flex-col items-center gap-8">
+              <div className="w-full max-w-2xl bg-white/5 rounded-xl shadow p-6 border border-white/10">
+                <h3 className="text-2xl font-semibold text-white mb-6 tracking-tight">Department Admins</h3>
+                {departmentAdmins.length === 0 && <div className="text-gray-400">No Department Admins found.</div>}
+                {departmentAdmins.map((group) => (
+                  <div key={group.departmentId} className="mb-8">
+                    <div className="text-base font-medium text-blue-400 mb-2 uppercase tracking-wide pl-1">{group.departmentName}</div>
+                    {group.admins.length === 0 ? (
+                      <div className="text-gray-400 text-sm mb-2 pl-1">No admins for this department.</div>
+                    ) : (
+                      <ul className="space-y-2">
+                        {group.admins.map((admin) => (
+                          <li
+                            key={admin.id}
+                            className="bg-white/10 hover:bg-white/20 transition-colors text-white px-4 py-3 rounded-lg flex flex-col sm:flex-row sm:items-center sm:gap-6 border border-white/10"
+                          >
+                            <span className="font-semibold text-base leading-tight">{admin.name}</span>
+                            <span className="text-xs text-gray-300 sm:ml-2">{admin.email}</span>
+                            <span className="text-xs text-gray-400 sm:ml-auto">ID: {admin.adminId}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {/* Create Department Admin Form */}
+              <div className="w-full max-w-md bg-white/5 rounded-xl shadow p-6 border border-white/10">
+                <h3 className="text-xl font-semibold text-white mb-4">Create Department Admin</h3>
+                <form onSubmit={handleCreateAdmin} className="flex flex-col gap-4">
+                  <input
+                    className="px-4 py-2 rounded bg-white/10 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    name="name"
+                    placeholder="Name"
+                    value={adminForm.name}
+                    onChange={handleAdminFormChange}
+                    required
+                  />
+                  <input
+                    className="px-4 py-2 rounded bg-white/10 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    name="email"
+                    type="email"
+                    placeholder="Email"
+                    value={adminForm.email}
+                    onChange={handleAdminFormChange}
+                    required
+                  />
+                  <input
+                    className="px-4 py-2 rounded bg-white/10 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    name="adminId"
+                    placeholder="Admin ID"
+                    value={adminForm.adminId}
+                    onChange={handleAdminFormChange}
+                    required
+                  />
+                  <input
+                    className="px-4 py-2 rounded bg-white/10 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    name="password"
+                    type="password"
+                    placeholder="Password"
+                    value={adminForm.password}
+                    onChange={handleAdminFormChange}
+                    required
+                  />
+                  <select
+                    name="departmentId"
+                    value={adminForm.departmentId}
+                    onChange={handleAdminFormChange}
+                    className="px-4 py-2 rounded bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    required
+                  >
+                    {departments.map((dept) => (
+                      <option key={dept.id} value={dept.id} className="text-black">{dept.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded transition-colors text-sm"
+                    disabled={adminLoading}
+                  >
+                    {adminLoading ? "Creating..." : "Create Department Admin"}
+                  </button>
+                  {adminStatus && <div className="text-white text-xs mt-2">{adminStatus}</div>}
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+} 
