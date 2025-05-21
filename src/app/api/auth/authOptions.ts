@@ -1,9 +1,7 @@
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
-import { PrismaClient } from "@prisma/client";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
-
-const prisma = new PrismaClient();
+import { prisma } from "../../../lib/prisma";
 
 export const authOptions = {
   adapter: PrismaAdapter(prisma),
@@ -25,6 +23,7 @@ export const authOptions = {
           name: user.name,
           email: user.email,
           role: user.role,
+          adminId: user.adminId,
           companyId: user.companyId,
           departmentId: user.departmentId,
         };
@@ -38,6 +37,7 @@ export const authOptions = {
     async jwt({ token, user }: { token: any, user?: any }) {
       if (user) {
         token.role = user.role || "SUPERADMIN";
+        token.adminId = user.adminId;
         token.companyId = user.companyId || null;
         token.departmentId = user.departmentId || null;
         token.name = user.name;
@@ -49,6 +49,7 @@ export const authOptions = {
       if (token) {
         session.user = session.user || {};
         session.user.role = token.role || "SUPERADMIN";
+        session.user.adminId = token.adminId;
         session.user.companyId = token.companyId || null;
         session.user.departmentId = token.departmentId || null;
         session.user.name = token.name;

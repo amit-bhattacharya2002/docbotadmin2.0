@@ -23,11 +23,23 @@ export async function POST(req: NextRequest) {
   }
   // Get adminId from session
   const adminId = session?.user?.adminId || "unknown";
-  // Generate namespace
-  const namespace = `${company.name}_${name}_${adminId}`.replace(/\s+/g, "");
+  // Generate namespaces for internal and external use
+  const internalNamespace = `${company.name}_${name}_${adminId}_Internal`.replace(/\s+/g, "");
+  const externalNamespace = `${company.name}_${name}_${adminId}_External`.replace(/\s+/g, "");
+  
   const department = await prisma.department.create({
-    data: { name, companyId, namespace },
-    select: { id: true, name: true, namespace: true },
+    data: { 
+      name, 
+      companyId, 
+      namespace: internalNamespace,
+      externalNamespace: externalNamespace 
+    },
+    select: { 
+      id: true, 
+      name: true, 
+      namespace: true,
+      externalNamespace: true 
+    },
   });
   return NextResponse.json({ department });
 } 

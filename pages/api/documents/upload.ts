@@ -3,9 +3,10 @@ import { Pinecone } from '@pinecone-database/pinecone';
 import { v4 as uuidv4 } from 'uuid';
 import mammoth from 'mammoth';
 import pdfParse from 'pdf-parse';
-import formidable, { File as FormidableFile } from 'formidable';
+import formidable, { File as FormidableFile, Fields, Files } from 'formidable';
 import fs from 'fs/promises';
 import OpenAI from 'openai';
+import { uploadToR2 } from '../../../src/lib/r2';
 
 export const config = {
   api: {
@@ -61,7 +62,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   const form = formidable({ keepExtensions: true });
-  form.parse(req, async (err, fields, files) => {
+  form.parse(req, async (err: Error | null, fields: Fields, files: Files) => {
     if (err) {
       console.error('[UPLOAD] Formidable error:', err);
       res.status(500).json({ error: 'Formidable error', details: String(err) });
@@ -85,6 +86,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return;
       }
       console.log('[UPLOAD] originalName:', originalName, 'filePath:', filePath, 'namespace:', namespace);
+
+      // Read file content
+      const fileBuffer = await fs.readFile(filePath);
+      
+      // Upload to R2
+      const fileKey = `${namespace}/${Date.now()}-${originalName}`;
+      const contentType = originalName.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      const r2Url = await uploadToR2(fileBuffer, fileKey, contentType);
+      console.log('[UPLOAD] File uploaded to R2:', r2Url);
 
       let rawText: string[] = [];
       if (originalName.endsWith('.pdf')) {
@@ -119,13 +129,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           metadata: {
             source: originalName,
             text: chunks[i],
+            r2Url: fileKey,
           },
         }));
 
         console.log('[UPLOAD] Upserting to Pinecone:', vectors.length, 'vectors');
         await pinecone.index(indexName).namespace(namespace).upsert(vectors);
         console.log('[UPLOAD] Upsert complete');
-        res.status(200).json({ message: `✅ ${originalName} uploaded and indexed!` });
+        res.status(200).json({ message: `✅ ${originalName} uploaded and indexed!`, r2Url });
       } catch (embeddingError) {
         console.error('[UPLOAD] OpenAI or Pinecone error:', embeddingError);
         res.status(500).json({ error: 'Embedding or Pinecone error', details: String(embeddingError) });

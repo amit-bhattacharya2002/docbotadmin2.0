@@ -14,10 +14,11 @@ export default function DepartmentAdminHeader({ companyName, departmentName, use
 
   return (
     <header className="flex items-center justify-between px-8 py-4 bg-white/10 backdrop-blur-lg border-b border-white/20">
-      <div className="flex items-center gap-2 text-white text-2xl font-bold">
+      <div className="flex items-center justify-center gap-2 text-white text-2xl font-bold">
         <span>{companyName}</span>
-        <span className="text-blue-400 font-semibold">docBot Admin</span>
-        <span className="text-base text-gray-300 font-normal ml-2">{departmentName}</span>
+        <span className="text-blue-400 font-semibold">Docbot Admin</span>
+        <span className="text-gray-300"> \</span>
+        <span className="text-xl text-gray-300 font-normal ml-2">{departmentName}</span>
       </div>
       <div className="relative">
         <button

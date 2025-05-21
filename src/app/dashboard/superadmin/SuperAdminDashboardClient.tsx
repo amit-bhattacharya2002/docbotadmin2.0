@@ -27,6 +27,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [deletingDept, setDeletingDept] = useState<string | null>(null);
   const [adminForm, setAdminForm] = useState({
     name: "",
     email: "",
@@ -95,13 +96,36 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
     }
   };
 
+  const handleDeleteDepartment = async (departmentId: string) => {
+    if (!confirm('Are you sure you want to delete this department?')) return;
+    
+    setDeletingDept(departmentId);
+    try {
+      const res = await fetch(`/api/departments/${departmentId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+        setDepartments(departments.filter(dept => dept.id !== departmentId));
+        setStatus("Department deleted successfully!");
+      } else {
+        setStatus(data.message || "Failed to delete department.");
+      }
+    } catch (error) {
+      setStatus("An error occurred while deleting the department.");
+    } finally {
+      setDeletingDept(null);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 flex flex-col">
+    <div className="min-h-screen bg-black flex flex-col">
       {/* Header */}
       <header className="flex items-center justify-between px-8 py-4 bg-white/10 backdrop-blur-lg border-b border-white/20">
         <div className="flex items-center gap-2 text-white text-2xl font-bold">
           <span>{company?.name || "Company"}</span>
-          <span className="text-blue-400 font-semibold">docBot Admin</span>
+          <span className="text-blue-400 font-semibold">Docbot</span>
         </div>
         <div className="relative">
           <button
@@ -128,7 +152,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
 
       {/* Tabs */}
       <div className="flex flex-col items-center mt-8">
-        <div className="flex gap-4 mb-6">
+        <div className="flex gap-4 mb-0">
           <button
             className={`px-6 py-2 rounded-t-lg font-semibold text-lg transition-colors ${activeTab === "Departments" ? "bg-blue-600 text-white" : "bg-white/20 text-white hover:bg-blue-500/30"}`}
             onClick={() => setActiveTab("Departments")}
@@ -152,7 +176,16 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                 <h3 className="text-xl font-bold text-white mb-4">All Departments</h3>
                 <ul className="space-y-2">
                   {departments.map((dept) => (
-                    <li key={dept.id} className="bg-white/20 text-white px-4 py-2 rounded-lg">{dept.name}</li>
+                    <li key={dept.id} className="bg-white/20 text-white px-4 py-2 rounded-lg flex justify-between items-center">
+                      <span>{dept.name}</span>
+                      <button
+                        onClick={() => handleDeleteDepartment(dept.id)}
+                        disabled={deletingDept === dept.id}
+                        className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition-colors disabled:opacity-50"
+                      >
+                        {deletingDept === dept.id ? "Deleting..." : "Delete"}
+                      </button>
+                    </li>
                   ))}
                 </ul>
               </div>
@@ -180,8 +213,8 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
             </div>
           )}
           {activeTab === "Department Admins" && (
-            <div className="flex flex-col items-center gap-8">
-              <div className="w-full max-w-2xl bg-white/5 rounded-xl shadow p-6 border border-white/10">
+            <div className="flex flex-col md:flex-row  gap-8">
+              <div className="w-full h-full max-w-2xl bg-white/5 rounded-xl shadow p-6 border border-white/10">
                 <h3 className="text-2xl font-semibold text-white mb-6 tracking-tight">Department Admins</h3>
                 {departmentAdmins.length === 0 && <div className="text-gray-400">No Department Admins found.</div>}
                 {departmentAdmins.map((group) => (
@@ -207,7 +240,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                 ))}
               </div>
               {/* Create Department Admin Form */}
-              <div className="w-full max-w-md bg-white/5 rounded-xl shadow p-6 border border-white/10">
+              <div className="w-full h-full max-w-md bg-white/5 rounded-xl shadow p-6 border border-white/10">
                 <h3 className="text-xl font-semibold text-white mb-4">Create Department Admin</h3>
                 <form onSubmit={handleCreateAdmin} className="flex flex-col gap-4">
                   <input

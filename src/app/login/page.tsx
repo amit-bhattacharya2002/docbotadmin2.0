@@ -31,30 +31,40 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-700">
+    <div className="min-h-screen flex items-center justify-center bg-black">
       <form
         onSubmit={handleSubmit}
         className="bg-white/10 backdrop-blur-lg p-8 rounded-2xl shadow-xl w-full max-w-md flex flex-col gap-6 border border-white/20"
       >
-        <h2 className="text-3xl font-bold text-white mb-2 text-center">Login</h2>
-        <input
-          className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          name="email"
-          type="email"
-          placeholder="Email"
-          value={form.email}
-          onChange={handleChange}
-          required
-        />
-        <input
-          className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          name="password"
-          type="password"
-          placeholder="Password"
-          value={form.password}
-          onChange={handleChange}
-          required
-        />
+        <h2 className="text-3xl h-full font-bold mb-2 text-center bg-gradient-to-r from-blue-400 to-blue-600 bg-clip-text text-transparent">Login</h2>
+        <div className="flex flex-col gap-4">
+          <label className="text-gray-300 text-sm" htmlFor="email">
+            Email
+          </label>
+          <input
+            className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            name="email"
+            type="email"
+            placeholder="Email"
+            value={form.email}
+            onChange={handleChange}
+            required
+            id="email"
+          />
+          <label className="text-gray-300 text-sm" htmlFor="password">
+            Password
+          </label>
+          <input
+            className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            name="password"
+            type="password"
+            placeholder="Password"
+            value={form.password}
+            onChange={handleChange}
+            required
+            id="password"
+          />
+        </div>
         <button
           type="submit"
           className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors mt-2 disabled:opacity-60"
