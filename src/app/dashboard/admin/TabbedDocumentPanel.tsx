@@ -1,19 +1,27 @@
 "use client";
 import { useState, useEffect } from "react";
+import { FiRefreshCw } from "react-icons/fi";
 
 export default function TabbedDocumentPanel({ namespace }: { namespace: string }) {
   const [activeTab, setActiveTab] = useState("Upload Document");
   const [documents, setDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Fetch documents when Manage tab is active
-  useEffect(() => {
-    if (activeTab === "Manage Document" && namespace) {
+  // Refetch documents function
+  const fetchDocuments = () => {
+    if (namespace) {
       setLoading(true);
       fetch(`/api/documents?namespace=${encodeURIComponent(namespace)}`)
         .then(res => res.json())
         .then(data => setDocuments(data.documents || []))
         .finally(() => setLoading(false));
+    }
+  };
+
+  // Fetch documents when Manage tab is active
+  useEffect(() => {
+    if (activeTab === "Manage Document" && namespace) {
+      fetchDocuments();
     }
   }, [activeTab, namespace]);
 
@@ -42,7 +50,22 @@ export default function TabbedDocumentPanel({ namespace }: { namespace: string }
       </div>
       <div className="p-8">
         {activeTab === "Upload Document" && <UploadDocumentPanel namespace={namespace} onUpload={() => setActiveTab("Manage Document")}/>} 
-        {activeTab === "Manage Document" && <ManageDocumentPanel namespace={namespace} documents={documents} loading={loading} onDelete={id => setDocuments(docs => docs.filter(doc => doc.id !== id))} />}
+        {activeTab === "Manage Document" && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-white">Manage {namespaceType} Documents</h2>
+              <button
+                onClick={fetchDocuments}
+                className="p-2 rounded hover:bg-blue-500/20 transition flex items-center"
+                aria-label="Refresh documents"
+                disabled={loading}
+              >
+                <FiRefreshCw className={`h-6 w-6 text-blue-500 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+            <ManageDocumentPanel namespace={namespace} documents={documents} loading={loading} onDelete={id => setDocuments(docs => docs.filter(doc => doc.id !== id))} />
+          </div>
+        )}
       </div>
     </div>
   );

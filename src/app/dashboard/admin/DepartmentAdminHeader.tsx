@@ -13,7 +13,7 @@ export default function DepartmentAdminHeader({ companyName, departmentName, use
   };
 
   return (
-    <header className="flex items-center justify-between px-8 py-4 bg-white/10 backdrop-blur-lg border-b border-white/20">
+    <header className="flex items-center h-[10vh] justify-between px-8 py-4 bg-white/10 backdrop-blur-lg border-b border-white/20">
       <div className="flex items-center justify-center gap-2 text-white text-2xl font-bold">
         <span>{companyName}</span>
         <span className="text-blue-400 font-semibold">Docbot Admin</span>

@@ -5,7 +5,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "DocBot Admin",
+  title: "Docbot Admin",
   description: "Document management and knowledge base system",
 };
 
@@ -17,9 +17,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-
-          {children}
-
+        <div className="min-h-screen flex flex-col">
+          <div className="flex-1 flex flex-col">
+            {children}
+          </div>
+          
+        </div>
       </body>
     </html>
   );

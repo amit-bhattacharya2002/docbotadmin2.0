@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signOut } from "next-auth/react";
 
 type DepartmentAdminGroup = {
@@ -37,6 +37,44 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
   });
   const [adminStatus, setAdminStatus] = useState<string | null>(null);
   const [adminLoading, setAdminLoading] = useState(false);
+  const [deletingAdmin, setDeletingAdmin] = useState<string | null>(null);
+  const [refreshingAdmins, setRefreshingAdmins] = useState(false);
+  const [refreshingDepts, setRefreshingDepts] = useState(false);
+  const [localDepartmentAdmins, setLocalDepartmentAdmins] = useState<DepartmentAdminGroup[]>(departmentAdmins);
+
+  const handleRefreshAdmins = async () => {
+    setRefreshingAdmins(true);
+    try {
+      const res = await fetch("/api/department-admins");
+      const data = await res.json();
+      if (res.ok) {
+        setLocalDepartmentAdmins(data);
+      } else {
+        console.error("Failed to fetch department admins:", data.message);
+      }
+    } catch (error) {
+      console.error("Error fetching department admins:", error);
+    } finally {
+      setRefreshingAdmins(false);
+    }
+  };
+
+  const handleRefreshDepartments = async () => {
+    setRefreshingDepts(true);
+    try {
+      const res = await fetch("/api/departments");
+      const data = await res.json();
+      if (res.ok) {
+        setDepartments(data.departments);
+      } else {
+        console.error("Failed to fetch departments:", data.message);
+      }
+    } catch (error) {
+      console.error("Error fetching departments:", error);
+    } finally {
+      setRefreshingDepts(false);
+    }
+  };
 
   const handleAddDepartment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,8 +157,32 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
     }
   };
 
+  const handleDeleteAdmin = async (adminId: string, departmentId: string) => {
+    if (!confirm('Are you sure you want to delete this department admin?')) return;
+    setDeletingAdmin(adminId);
+    try {
+      const res = await fetch(`/api/department-admins/${adminId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAdminStatus("Department Admin deleted successfully!");
+        setAdminForm((prev) => ({ ...prev }));
+        setAdminStatus(null);
+        setDeletingAdmin(null);
+        window.location.reload();
+      } else {
+        setAdminStatus(data.message || "Failed to delete department admin.");
+      }
+    } catch (error) {
+      setAdminStatus("An error occurred while deleting the department admin.");
+    } finally {
+      setDeletingAdmin(null);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-black flex flex-col">
+    <div className="min-h-screen flex flex-col bg-black">
       {/* Header */}
       <header className="flex items-center justify-between px-8 py-4 bg-white/10 backdrop-blur-lg border-b border-white/20">
         <div className="flex items-center gap-2 text-white text-2xl font-bold">
@@ -149,31 +211,79 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
           )}
         </div>
       </header>
-
-      {/* Tabs */}
-      <div className="flex flex-col items-center mt-8">
-        <div className="flex gap-4 mb-0">
+      <div className="flex flex-1">
+        {/* Sidebar */}
+        <aside className="w-64 bg-gray-900 border-r border-white/10 flex flex-col py-8">
           <button
-            className={`px-6 py-2 rounded-t-lg font-semibold text-lg transition-colors ${activeTab === "Departments" ? "bg-blue-600 text-white" : "bg-white/20 text-white hover:bg-blue-500/30"}`}
+            className={`px-6 py-3 text-left text-lg font-semibold transition-colors ${
+              activeTab === "Departments"
+                ? "bg-blue-600 text-white"
+                : "text-gray-300 hover:bg-blue-500/20"
+            }`}
             onClick={() => setActiveTab("Departments")}
           >
             Departments
           </button>
           <button
-            className={`px-6 py-2 rounded-t-lg font-semibold text-lg transition-colors ${activeTab === "Department Admins" ? "bg-blue-600 text-white" : "bg-white/20 text-white hover:bg-blue-500/30"}`}
+            className={`px-6 py-3 text-left text-lg font-semibold transition-colors ${
+              activeTab === "Department Admins"
+                ? "bg-blue-600 text-white"
+                : "text-gray-300 hover:bg-blue-500/20"
+            }`}
             onClick={() => setActiveTab("Department Admins")}
           >
             Department Admins
           </button>
-        </div>
-
-        {/* Tab Panels */}
-        <div className="w-full max-w-4xl bg-white/10 rounded-b-2xl shadow-xl p-8 border border-white/20">
+          <div className="flex-1" />
+        </aside>
+        {/* Main Content */}
+        <main className="flex-1 p-8 overflow-auto">
           {activeTab === "Departments" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               {/* Department List */}
               <div>
-                <h3 className="text-xl font-bold text-white mb-4">All Departments</h3>
+                <div className="flex items-center gap-2 mb-4">
+                  <h3 className="text-xl font-bold text-white">All Departments</h3>
+                  <button
+                    onClick={handleRefreshDepartments}
+                    disabled={refreshingDepts}
+                    className="p-1 rounded-full hover:bg-white/20 focus:outline-none"
+                    title="Refresh"
+                  >
+                    {refreshingDepts ? (
+                      <svg
+                        className="w-5 h-5 text-white animate-spin"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                        />
+                      </svg>
+                    ) : (
+                      <svg
+                        className="w-5 h-5 text-white"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
                 <ul className="space-y-2">
                   {departments.map((dept) => (
                     <li key={dept.id} className="bg-white/20 text-white px-4 py-2 rounded-lg flex justify-between items-center">
@@ -213,11 +323,52 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
             </div>
           )}
           {activeTab === "Department Admins" && (
-            <div className="flex flex-col md:flex-row  gap-8">
-              <div className="w-full h-full max-w-2xl bg-white/5 rounded-xl shadow p-6 border border-white/10">
-                <h3 className="text-2xl font-semibold text-white mb-6 tracking-tight">Department Admins</h3>
-                {departmentAdmins.length === 0 && <div className="text-gray-400">No Department Admins found.</div>}
-                {departmentAdmins.map((group) => (
+            <div className="flex flex-col md:flex-row gap-8">
+              <div className="w-full h-full max-w-2xl ">
+                <div className="flex items-center gap-2 mb-6">
+                  <h3 className="text-2xl font-semibold text-white tracking-tight">Department Admins</h3>
+                  <button
+                    onClick={handleRefreshAdmins}
+                    disabled={refreshingAdmins}
+                    className="p-1 rounded-full hover:bg-white/20 focus:outline-none"
+                    title="Refresh"
+                  >
+                    {refreshingAdmins ? (
+                      <svg
+                        className="w-5 h-5 text-white animate-spin"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                        />
+                      </svg>
+                    ) : (
+                      <svg
+                        className="w-5 h-5 text-white"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                {localDepartmentAdmins.length === 0 && <div className="text-gray-400">No Department Admins found.</div>}
+                {localDepartmentAdmins.map((group) => (
                   <div key={group.departmentId} className="mb-8">
                     <div className="text-base font-medium text-blue-400 mb-2 uppercase tracking-wide pl-1">{group.departmentName}</div>
                     {group.admins.length === 0 ? (
@@ -232,6 +383,13 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                             <span className="font-semibold text-base leading-tight">{admin.name}</span>
                             <span className="text-xs text-gray-300 sm:ml-2">{admin.email}</span>
                             <span className="text-xs text-gray-400 sm:ml-auto">ID: {admin.adminId}</span>
+                            <button
+                              onClick={() => handleDeleteAdmin(admin.id, group.departmentId)}
+                              disabled={deletingAdmin === admin.id}
+                              className="ml-4 px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors disabled:opacity-50"
+                            >
+                              {deletingAdmin === admin.id ? "Deleting..." : "Delete"}
+                            </button>
                           </li>
                         ))}
                       </ul>
@@ -240,7 +398,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                 ))}
               </div>
               {/* Create Department Admin Form */}
-              <div className="w-full h-full max-w-md bg-white/5 rounded-xl shadow p-6 border border-white/10">
+              <div className="w-full h-full max-w-md bg-white/5 rounded-xl shadow p-6 border border-white">
                 <h3 className="text-xl font-semibold text-white mb-4">Create Department Admin</h3>
                 <form onSubmit={handleCreateAdmin} className="flex flex-col gap-4">
                   <input
@@ -300,7 +458,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
               </div>
             </div>
           )}
-        </div>
+        </main>
       </div>
     </div>
   );

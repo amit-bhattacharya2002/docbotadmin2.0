@@ -5,6 +5,35 @@ import { authOptions } from "../auth/authOptions";
 
 const prisma = new PrismaClient();
 
+export async function GET(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  
+  // Check if user is authenticated and is a superadmin
+  if (!session?.user || session.user.role !== "SUPERADMIN") {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const departments = await prisma.department.findMany({
+      where: {
+        companyId: session.user.companyId
+      },
+      select: {
+        id: true,
+        name: true
+      }
+    });
+
+    return NextResponse.json({ departments });
+  } catch (error) {
+    console.error("Error fetching departments:", error);
+    return NextResponse.json(
+      { message: "Failed to fetch departments" },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   const { name, companyId } = await req.json();

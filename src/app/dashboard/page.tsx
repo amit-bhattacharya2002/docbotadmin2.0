@@ -9,13 +9,24 @@ export default async function DashboardEntry() {
     redirect("/login");
   }
 
+  let redirecting = false;
   if (session.user.role === "SUPERADMIN") {
+    redirecting = true;
     redirect("/dashboard/superadmin");
   } else if (session.user.role === "DEPARTMENTADMIN") {
+    redirecting = true;
     redirect("/dashboard/admin");
   } else {
+    redirecting = true;
     redirect("/login");
   }
 
-  return null;
+  // Show loading prompt while redirecting
+  return (
+    <div className="min-h-[90vh] flex items-center justify-center bg-black">
+      <div className="text-white text-xl font-semibold animate-pulse">
+        Loading dashboard...
+      </div>
+    </div>
+  );
 } 

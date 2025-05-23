@@ -9,31 +9,29 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ departmentId: string }> }
 ): Promise<NextResponse> {
-  const session = await getServerSession(authOptions);
-  const { departmentId } = await params;              // ← await the params promise
+  const { departmentId } = await params;
   
-  // Check if user is authenticated and is a superadmin
+  const session = await getServerSession(authOptions);
   if (!session?.user || session.user.role !== "SUPERADMIN") {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    // First check if there are any users associated with this department
     const usersInDepartment = await prisma.user.findFirst({
-      where: { departmentId }
+      where: { departmentId },
     });
+
     if (usersInDepartment) {
       return NextResponse.json(
-        { message: "Cannot delete department with associated users. Please remove or reassign users first." },
+        {
+          message:
+            "Cannot delete department with associated users. Please remove or reassign users first.",
+        },
         { status: 400 }
       );
     }
 
-    // Delete the department
-    await prisma.department.delete({
-      where: {  id: departmentId }
-    });
-
+    await prisma.department.delete({ where: { id: departmentId } });
     return NextResponse.json({ message: "Department deleted successfully" });
   } catch (error) {
     console.error("Error deleting department:", error);
