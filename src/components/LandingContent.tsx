@@ -11,7 +11,7 @@ export default function LandingContent() {
       <div className="w-full max-w-4xl mx-auto py-20 px-4">
         <div className="flex flex-col items-center text-center gap-8">
           <h1 className="text-8xl font-extrabold bg-gradient-to-r from-blue-400 to-blue-600 bg-clip-text text-transparent">
-            DocBot Admin
+            Docbot Admin
           </h1>
           <p className="text-xl max-w-2xl text-gray-300">
             Streamline your document management and knowledge base with AI-powered insights.
