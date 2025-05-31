@@ -14,8 +14,8 @@ const pinecone = new Pinecone({
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Optimized batch sizes for better performance
-const EMBEDDING_BATCH_SIZE = 100;
-const VECTOR_BATCH_SIZE = 50;
+const EMBEDDING_BATCH_SIZE = 50;
+const VECTOR_BATCH_SIZE = 25;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
@@ -64,43 +64,122 @@ async function retryWithBackoff<T>(
   throw lastError || new Error('Operation failed after all retries');
 }
 
-async function parsePDF(buffer: Buffer) {
+async function parsePDF(buffer: Buffer): Promise<string[]> {
   const data = await pdfParse(buffer);
-  // Split by newlines and filter out empty lines
-  return data.text
-    .split('\n')
-    .map((line: string) => line.trim())
-    .filter((line: string) => line.length > 0);
+  
+  // Basic cleanup: normalize whitespace and line breaks
+  const text = data.text
+    .replace(/\r?\n/g, ' ')  // Convert newlines to spaces
+    .replace(/\s+/g, ' ')    // Normalize whitespace
+    .trim();
+
+  return [text];
 }
 
-async function parseDocx(buffer: Buffer) {
+async function parseDocx(buffer: Buffer): Promise<string[]> {
   const result = await mammoth.extractRawText({ buffer });
-  // Split by newlines and filter out empty lines
-  return result.value
-    .split('\n')
-    .map((line: string) => line.trim())
-    .filter((line: string) => line.length > 0);
+  
+  // Basic cleanup: normalize whitespace and line breaks
+  const text = result.value
+    .replace(/\r?\n/g, ' ')  // Convert newlines to spaces
+    .replace(/\s+/g, ' ')    // Normalize whitespace
+    .trim();
+
+  return [text];
 }
 
-function splitText(texts: string[], chunkSize = 1000, overlap = 100): string[] {
+function splitText(
+  texts: string[],
+  chunkSize = 1000,
+  overlap = 100
+): string[] {
   if (!Array.isArray(texts) || texts.length === 0) {
     throw new Error('Input must be a non-empty array of strings');
   }
-  
+
   const chunks: string[] = [];
-  texts.forEach((text) => {
-    if (typeof text !== 'string' || !text.trim()) {
+  
+  // Enhanced contact info patterns
+  const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  const phonePattern = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
+
+  for (const raw of texts) {
+    if (typeof raw !== 'string' || !raw.trim()) {
       console.warn('[PROCESS] Skipping empty text chunk');
-      return; // Skip empty chunks instead of throwing
+      continue;
     }
-    let start = 0;
-    while (start < text.length) {
-      const end = start + chunkSize;
-      chunks.push(text.slice(start, end));
-      start += chunkSize - overlap;
+
+    // Extract and preserve contact information
+    const emails = raw.match(emailPattern) || [];
+    const phones = raw.match(phonePattern) || [];
+    
+    // If we found contact info, create a dedicated contact chunk
+    if (emails.length > 0 || phones.length > 0) {
+      const contactInfo = [...emails, ...phones].join(' ');
+      chunks.push(contactInfo);
     }
-  });
-  return chunks;
+
+    // Split text into sentences using natural language boundaries
+    const sentences = raw
+      // Split on sentence endings followed by space
+      .split(/(?<=[.!?])\s+/)
+      // Filter out empty sentences
+      .filter(s => s.trim().length > 0)
+      // Clean up each sentence
+      .map(s => s.trim());
+
+    // Build chunks based on semantic boundaries
+    let currentChunk = '';
+    for (const sentence of sentences) {
+      // If adding this sentence would exceed chunk size
+      if (currentChunk.length + sentence.length + 1 > chunkSize) {
+        if (currentChunk) {
+          chunks.push(currentChunk.trim());
+          // Start new chunk with overlap
+          const overlapStart = Math.max(
+            currentChunk.length - overlap,
+            0
+          );
+          currentChunk = currentChunk.slice(overlapStart).trim();
+        }
+        // If single sentence is too long, split it at word boundaries
+        if (sentence.length > chunkSize) {
+          let remaining = sentence;
+          while (remaining.length > 0) {
+            if (remaining.length <= chunkSize) {
+              chunks.push(remaining.trim());
+              break;
+            }
+            const splitPoint = remaining
+              .slice(0, chunkSize)
+              .lastIndexOf(' ');
+            if (splitPoint === -1) {
+              chunks.push(remaining.slice(0, chunkSize).trim());
+              remaining = remaining.slice(chunkSize);
+            } else {
+              chunks.push(remaining.slice(0, splitPoint).trim());
+              remaining = remaining.slice(splitPoint + 1);
+            }
+          }
+        } else {
+          currentChunk = sentence;
+        }
+      } else {
+        // Add sentence to current chunk
+        currentChunk += (currentChunk ? ' ' : '') + sentence;
+      }
+    }
+
+    // Add the last chunk if it exists
+    if (currentChunk) {
+      chunks.push(currentChunk.trim());
+    }
+  }
+
+  // Filter out tiny or meaningless chunks
+  return chunks.filter(
+    chunk => chunk.length > 10 && !/^[\s\p{P}]+$/u.test(chunk)
+  );
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -199,15 +278,40 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           console.log('[PROCESS] Embeddings generated for current batch:', allEmbeddings.length);
 
           // Create vectors for Pinecone
-          const vectors = allEmbeddings.map((embedding: number[], i: number) => ({
-            id: uuidv4(),
-            values: embedding,
-            metadata: {
-              source: fileName!,
-              text: chunks[i + (startBatch * EMBEDDING_BATCH_SIZE)].slice(0, 500),
-              r2Url: fileKey!,
-            },
-          }));
+          const vectors = allEmbeddings.map((embedding: number[], i: number) => {
+            const chunkText = chunks[i + (startBatch * EMBEDDING_BATCH_SIZE)];
+            
+            // Enhanced contact info detection
+            const emails = chunkText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
+            const phones = chunkText.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g) || [];
+            
+            // Determine if this is a contact info chunk
+            const hasPhone = phones.length > 0;
+            const hasEmail = emails.length > 0;
+            const isContactInfo = hasPhone || hasEmail;
+            
+            // Store contact info in a structured way
+            const contactInfo = isContactInfo ? {
+              emails: emails,
+              phones: phones,
+              hasPhone,
+              hasEmail
+            } : undefined;
+            
+            return {
+              id: uuidv4(),
+              values: embedding,
+              metadata: {
+                source: fileName!,
+                text: chunkText.slice(0, 2000),
+                r2Url: fileKey!,
+                isContactInfo,
+                ...(contactInfo || {}),
+                chunkIndex: i + (startBatch * EMBEDDING_BATCH_SIZE),
+                totalChunks: chunks.length
+              },
+            };
+          });
 
           // Process vectors in optimized batches
           const vectorBatches: Array<typeof vectors> = [];
