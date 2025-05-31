@@ -97,7 +97,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const indexName = process.env.PINECONE_INDEX!;
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  const form = formidable({ keepExtensions: true });
+  const form = formidable({ 
+    keepExtensions: true,
+    maxFileSize: 50 * 1024 * 1024, // 50MB limit
+    maxFieldsSize: 50 * 1024 * 1024, // 50MB limit
+    multiples: false,
+  });
   form.parse(req, async (err: Error | null, fields: Fields, files: Files) => {
     if (err) {
       console.error('[UPLOAD] Formidable error:', err);

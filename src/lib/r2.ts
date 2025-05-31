@@ -211,3 +211,28 @@ export async function deleteFromR2(key: string): Promise<void> {
     throw error;
   }
 }
+
+// Function to get file content from R2
+export async function getFileFromR2(key: string): Promise<Buffer> {
+  console.log('Getting file from R2 with key:', key);
+  
+  const command = new GetObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: key,
+  });
+
+  try {
+    const response = await r2Client.send(command);
+    const chunks: Uint8Array[] = [];
+    
+    // @ts-ignore - response.Body is a ReadableStream
+    for await (const chunk of response.Body) {
+      chunks.push(chunk);
+    }
+    
+    return Buffer.concat(chunks);
+  } catch (error) {
+    console.error('Error getting file from R2:', error);
+    throw error;
+  }
+}

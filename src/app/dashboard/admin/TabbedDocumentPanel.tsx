@@ -170,107 +170,75 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
     setStatus(null);
     setProgress({ current: 0, total: 100, message: 'Initializing upload...', stage: 'uploading' });
     uploadCompleteRef.current = false;
-    
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("namespace", namespace);
 
     try {
-      // Close any existing EventSource
-      if (eventSourceRef.current) {
-        console.log('Closing existing EventSource');
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-
-      // Create EventSource for progress updates
-      const eventSource = new EventSource(`/api/documents/upload/progress?file=${encodeURIComponent(file.name)}`);
-      eventSourceRef.current = eventSource;
-      console.log('[UPLOAD] Created EventSource for progress updates');
-      
-      // Set up event handlers
-      eventSource.onopen = () => {
-        console.log('[UPLOAD] EventSource connected');
-        setProgress({
-          current: 0,
-          total: 100,
-          message: 'Connected to progress updates...',
-          stage: 'uploading'
-        });
-      };
-      
-      eventSource.onmessage = (event) => {
-        try {
-          console.log('[UPLOAD] Received progress update:', event.data);
-          const data = JSON.parse(event.data);
-          console.log('[UPLOAD] Parsed progress data:', data);
-          setProgress(data);
-          
-          // Only close connection if complete or error
-          if (data.stage === 'complete' || data.stage === 'error') {
-            console.log('[UPLOAD] Upload complete or error - stage:', data.stage);
-            uploadCompleteRef.current = true;
-            eventSource.close();
-            eventSourceRef.current = null;
-          }
-        } catch (error) {
-          console.error('[UPLOAD] Error parsing progress update:', error);
-        }
-      };
-      
-      eventSource.onerror = (error) => {
-        console.error('[UPLOAD] EventSource error:', error);
-        setProgress({
-          current: 0,
-          total: 100,
-          message: 'Error receiving progress updates',
-          stage: 'error'
-        });
-        uploadCompleteRef.current = true;
-        eventSource.close();
-        eventSourceRef.current = null;
-      };
-
-      // Start the file upload
-      console.log('Starting file upload...');
-      const res = await fetch("/api/documents/upload", {
-        method: "POST",
-        body: formData,
+      // 1. Get pre-signed URL
+      const presignedResponse = await fetch('/api/documents/presigned-url', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          namespace,
+          fileName: file.name,
+          contentType: file.type,
+        }),
       });
-      
-      const data = await res.json();
-      console.log('Upload response:', data);
-      
-      if (res.ok && data.message) {
-        setStatus(data.message);
-        setFile(null);
-        // Wait for progress to complete before switching tabs
-        if (!uploadCompleteRef.current) {
-          console.log('[UPLOAD] Waiting for progress to complete before switching tabs...');
-          await new Promise(resolve => {
-            const checkComplete = setInterval(() => {
-              if (uploadCompleteRef.current) {
-                clearInterval(checkComplete);
-                resolve(true);
-              }
-            }, 100);
-          });
-        }
-        // Call onUpload to refresh the document list
-        onUpload();
-      } else {
-        throw new Error(data.error || 'Upload failed');
+
+      if (!presignedResponse.ok) {
+        throw new Error('Failed to get upload URL');
       }
+
+      const { uploadUrl, fileKey } = await presignedResponse.json();
+
+      // 2. Upload directly to R2
+      setProgress({ current: 20, total: 100, message: 'Uploading to storage...', stage: 'uploading' });
+      
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        body: file,
+        headers: {
+          'Content-Type': file.type,
+        },
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload file');
+      }
+
+      // 3. Process the uploaded file
+      setProgress({ current: 40, total: 100, message: 'Processing document...', stage: 'processing' });
+      
+      const processResponse = await fetch('/api/documents/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          namespace,
+          fileKey,
+          fileName: file.name,
+        }),
+      });
+
+      if (!processResponse.ok) {
+        throw new Error('Failed to process file');
+      }
+
+      const data = await processResponse.json();
+      setStatus(data.message);
+      setFile(null);
+      onUpload();
+      
+      setProgress({ current: 100, total: 100, message: 'Upload complete!', stage: 'complete' });
+      uploadCompleteRef.current = true;
+
     } catch (error) {
       console.error('Upload error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Upload failed. Please try again.';
       setStatus(errorMessage);
       setProgress(prev => ({ ...prev!, message: errorMessage, stage: 'error' }));
       uploadCompleteRef.current = true;
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
     } finally {
       setLoading(false);
     }
