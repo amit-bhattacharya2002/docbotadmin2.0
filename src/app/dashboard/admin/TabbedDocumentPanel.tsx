@@ -171,70 +171,118 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
     setProgress({ current: 0, total: 100, message: 'Initializing upload...', stage: 'uploading' });
     uploadCompleteRef.current = false;
 
+    const maxRetries = 3;
+    let retryCount = 0;
+
+    const uploadWithRetry = async () => {
+      try {
+        // 1. Get pre-signed URL
+        const presignedResponse = await fetch('/api/documents/presigned-url', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            namespace,
+            fileName: file.name,
+            contentType: file.type,
+          }),
+        });
+
+        if (!presignedResponse.ok) {
+          throw new Error('Failed to get upload URL');
+        }
+
+        const { uploadUrl, fileKey } = await presignedResponse.json();
+
+        // 2. Upload directly to R2 with retry logic
+        setProgress({ current: 20, total: 100, message: 'Uploading to storage...', stage: 'uploading' });
+        
+        const uploadResponse = await fetch(uploadUrl, {
+          method: 'PUT',
+          body: file,
+          headers: {
+            'Content-Type': file.type,
+          },
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error('Failed to upload file');
+        }
+
+        // 3. Process the uploaded file in batches
+        setProgress({ current: 40, total: 100, message: 'Processing document...', stage: 'processing' });
+        
+        let currentPhase = 'embeddings';
+        let startBatch = 0;
+        let totalBatches = 0;
+
+        while (true) {
+          const processResponse = await fetch('/api/documents/process', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              namespace,
+              fileKey,
+              fileName: file.name,
+              phase: currentPhase,
+              startBatch,
+            }),
+          });
+
+          if (!processResponse.ok) {
+            throw new Error('Failed to process file');
+          }
+
+          const data = await processResponse.json();
+          
+          // Update progress for embeddings phase
+          const progress = 40 + Math.floor((startBatch / data.totalBatches) * 30);
+          setProgress({ 
+            current: progress, 
+            total: 100, 
+            message: data.message, 
+            stage: 'embedding' 
+          });
+
+          if (data.completed) {
+            // Processing complete
+            setStatus(data.message);
+            setFile(null);
+            onUpload();
+            setProgress({ current: 100, total: 100, message: 'Upload complete!', stage: 'complete' });
+            uploadCompleteRef.current = true;
+            break;
+          }
+
+          // Continue with next batch
+          startBatch = data.nextBatch;
+          totalBatches = data.totalBatches;
+        }
+
+      } catch (error) {
+        console.error('Upload error:', error);
+        if (retryCount < maxRetries) {
+          retryCount++;
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 10000); // Exponential backoff, max 10s
+          console.log(`Retrying upload in ${delay}ms (attempt ${retryCount}/${maxRetries})...`);
+          setProgress(prev => ({ 
+            ...prev!, 
+            message: `Upload failed, retrying in ${delay/1000}s...`, 
+            stage: 'retrying' 
+          }));
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return uploadWithRetry();
+        }
+        throw error;
+      }
+    };
+
     try {
-      // 1. Get pre-signed URL
-      const presignedResponse = await fetch('/api/documents/presigned-url', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          namespace,
-          fileName: file.name,
-          contentType: file.type,
-        }),
-      });
-
-      if (!presignedResponse.ok) {
-        throw new Error('Failed to get upload URL');
-      }
-
-      const { uploadUrl, fileKey } = await presignedResponse.json();
-
-      // 2. Upload directly to R2
-      setProgress({ current: 20, total: 100, message: 'Uploading to storage...', stage: 'uploading' });
-      
-      const uploadResponse = await fetch(uploadUrl, {
-        method: 'PUT',
-        body: file,
-        headers: {
-          'Content-Type': file.type,
-        },
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error('Failed to upload file');
-      }
-
-      // 3. Process the uploaded file
-      setProgress({ current: 40, total: 100, message: 'Processing document...', stage: 'processing' });
-      
-      const processResponse = await fetch('/api/documents/process', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          namespace,
-          fileKey,
-          fileName: file.name,
-        }),
-      });
-
-      if (!processResponse.ok) {
-        throw new Error('Failed to process file');
-      }
-
-      const data = await processResponse.json();
-      setStatus(data.message);
-      setFile(null);
-      onUpload();
-      
-      setProgress({ current: 100, total: 100, message: 'Upload complete!', stage: 'complete' });
-      uploadCompleteRef.current = true;
-
+      await uploadWithRetry();
     } catch (error) {
-      console.error('Upload error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Upload failed. Please try again.';
       setStatus(errorMessage);
       setProgress(prev => ({ ...prev!, message: errorMessage, stage: 'error' }));

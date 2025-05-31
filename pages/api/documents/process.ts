@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import mammoth from 'mammoth';
 import pdfParse from 'pdf-parse';
 import OpenAI from 'openai';
-import { getFileFromR2, updateManifestInR2, DocumentManifest, deleteFromR2 } from '@/lib/r2';
+import { getFileFromR2, updateManifestInR2, DocumentManifest, deleteFromR2, uploadToR2 } from '@/lib/r2';
 import crypto from 'crypto';
 
 const pinecone = new Pinecone({
@@ -13,15 +13,15 @@ const pinecone = new Pinecone({
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Reduced batch sizes to prevent timeouts and memory issues
-const EMBEDDING_BATCH_SIZE = 50; // Reduced from 100
-const VECTOR_BATCH_SIZE = 25; // Reduced from 50
+// Optimized batch sizes for better performance
+const EMBEDDING_BATCH_SIZE = 100;
+const VECTOR_BATCH_SIZE = 50;
 const MAX_RETRIES = 3;
-const RETRY_DELAY = 2000; // 2 seconds
+const RETRY_DELAY = 1000;
 
 // Add timeout configuration
-const API_TIMEOUT = 300000; // 5 minutes
-const CHUNK_TIMEOUT = 30000; // 30 seconds per chunk
+const API_TIMEOUT = 30000;
+const CHUNK_TIMEOUT = 25000;
 
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -113,10 +113,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let fileName: string | null = null;
 
   try {
-    // Wrap the entire handler in a timeout
     await withTimeout(
       (async () => {
-        const { namespace: reqNamespace, fileKey: reqFileKey, fileName: reqFileName } = req.body;
+        const { namespace: reqNamespace, fileKey: reqFileKey, fileName: reqFileName, phase = 'embeddings' } = req.body;
 
         // Validate input
         if (!reqNamespace || typeof reqNamespace !== 'string') {
@@ -164,96 +163,116 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         
         console.log('[PROCESS] Extracted text lines:', rawText.length);
         
-        // Split text into chunks
-        const chunks = splitText(rawText);
+        // Split text into chunks with larger size
+        const chunks = splitText(rawText, 3000, 300);
         console.log(`[PROCESS] Processing ${chunks.length} chunks`);
 
-        // Process embeddings in parallel batches
-        const embeddingBatches = [];
-        for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
-          embeddingBatches.push(chunks.slice(i, i + EMBEDDING_BATCH_SIZE));
-        }
-        
-        console.log(`[PROCESS] Processing ${embeddingBatches.length} embedding batches in parallel`);
-        
-        const embeddingPromises = embeddingBatches.map(async (batch, batchIndex) => {
-          console.log(`[PROCESS] Processing embedding batch ${batchIndex + 1}/${embeddingBatches.length}`);
-          return await retryWithBackoff(async () => {
-            const resp = await openai.embeddings.create({
-              model: 'text-embedding-ada-002',
-              input: batch,
-            });
-            return resp.data.map((d: any) => d.embedding);
-          });
-        });
-        
-        const embeddingResults = await Promise.all(embeddingPromises);
-        const allEmbeddings = embeddingResults.flat();
-        
-        console.log('[PROCESS] Embeddings generated:', allEmbeddings.length);
-
-        const vectors = allEmbeddings.map((embedding: number[], i: number) => ({
-          id: uuidv4(),
-          values: embedding,
-          metadata: {
-            source: fileName!,
-            text: chunks[i].slice(0, 500),
-            r2Url: fileKey!,
-          },
-        }));
-
-        // Process vectors in parallel batches
-        const vectorBatches = [];
-        for (let i = 0; i < vectors.length; i += VECTOR_BATCH_SIZE) {
-          vectorBatches.push(vectors.slice(i, i + VECTOR_BATCH_SIZE));
-        }
-        
-        console.log(`[PROCESS] Processing ${vectorBatches.length} vector batches in parallel`);
-        
-        const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(namespace);
-        const vectorPromises = vectorBatches.map(async (batch, batchIndex) => {
-          console.log(`[PROCESS] Processing vector batch ${batchIndex + 1}/${vectorBatches.length}`);
-          return await retryWithBackoff(async () => {
-            await index.upsert(batch);
-          });
-        });
-        
-        await Promise.all(vectorPromises);
-        console.log('[PROCESS] Upsert complete');
-
-        // Update manifest with new document
-        console.log('[PROCESS] Updating manifest...');
-        const newDocument: DocumentManifest = {
-          id: fileKey,
-          source: fileName,
-          r2Url: fileKey,
-          createdAt: new Date().toISOString(),
-          namespace,
-          hash: documentHash
-        };
-        console.log('[PROCESS] New document manifest:', newDocument);
-        
-        try {
-          await updateManifestInR2(namespace, newDocument);
-          console.log('[PROCESS] Manifest updated');
-        } catch (error) {
-          // If document already exists, we can still consider this a success
-          // since the vectors are already in Pinecone
-          if (error instanceof Error && error.message === 'Document with same content already exists') {
-            console.log('[PROCESS] Document already exists in manifest, continuing...');
-          } else {
-            throw error; // Re-throw other errors
+        if (phase === 'embeddings') {
+          // Phase 1: Generate embeddings
+          const { startBatch = 0 } = req.body;
+          const embeddingBatches: string[][] = [];
+          for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
+            embeddingBatches.push(chunks.slice(i, i + EMBEDDING_BATCH_SIZE));
           }
+          
+          console.log(`[PROCESS] Processing ${embeddingBatches.length} embedding batches`);
+          console.log(`[PROCESS] Starting from batch ${startBatch}`);
+          
+          // Process only a subset of batches to avoid timeout
+          const BATCHES_PER_CALL = 10;
+          const endBatch = Math.min(startBatch + BATCHES_PER_CALL, embeddingBatches.length);
+          const currentBatches = embeddingBatches.slice(startBatch, endBatch);
+          
+          // Generate embeddings for the current batch
+          const allEmbeddings: number[][] = [];
+          for (let i = 0; i < currentBatches.length; i++) {
+            const batchEmbeddings = await retryWithBackoff(async () => {
+              const resp = await openai.embeddings.create({
+                model: 'text-embedding-ada-002',
+                input: currentBatches[i],
+              });
+              return resp.data.map((d: any) => d.embedding);
+            });
+            allEmbeddings.push(...batchEmbeddings);
+          }
+          
+          console.log('[PROCESS] Embeddings generated for current batch:', allEmbeddings.length);
+
+          // Create vectors for Pinecone
+          const vectors = allEmbeddings.map((embedding: number[], i: number) => ({
+            id: uuidv4(),
+            values: embedding,
+            metadata: {
+              source: fileName!,
+              text: chunks[i + (startBatch * EMBEDDING_BATCH_SIZE)].slice(0, 500),
+              r2Url: fileKey!,
+            },
+          }));
+
+          // Process vectors in optimized batches
+          const vectorBatches: Array<typeof vectors> = [];
+          for (let i = 0; i < vectors.length; i += VECTOR_BATCH_SIZE) {
+            vectorBatches.push(vectors.slice(i, i + VECTOR_BATCH_SIZE));
+          }
+          
+          console.log(`[PROCESS] Processing ${vectorBatches.length} vector batches for embedding batch ${startBatch + 1}/${embeddingBatches.length}`);
+          
+          const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(namespace);
+          
+          // Process vector batches sequentially with optimized batch size
+          for (let i = 0; i < vectorBatches.length; i++) {
+            console.log(`[PROCESS] Processing vector batch ${i + 1}/${vectorBatches.length}`);
+            await retryWithBackoff(async () => {
+              await index.upsert(vectorBatches[i] as any);
+            });
+          }
+
+          // If there are more batches to process, return with next batch info
+          if (endBatch < embeddingBatches.length) {
+            return res.status(200).json({ 
+              success: true, 
+              message: `Processed batches ${startBatch + 1} to ${endBatch} of ${embeddingBatches.length}`,
+              nextPhase: 'embeddings',
+              nextBatch: endBatch,
+              totalBatches: embeddingBatches.length,
+              batchSize: EMBEDDING_BATCH_SIZE
+            });
+          }
+
+          // If all batches are processed, update manifest and return success
+          console.log('[PROCESS] All batches processed, updating manifest...');
+          const newDocument: DocumentManifest = {
+            id: fileKey,
+            source: fileName,
+            r2Url: fileKey,
+            createdAt: new Date().toISOString(),
+            namespace,
+            hash: documentHash
+          };
+          
+          try {
+            await updateManifestInR2(namespace, newDocument);
+            console.log('[PROCESS] Manifest updated');
+          } catch (error) {
+            if (error instanceof Error && error.message === 'Document with same content already exists') {
+              console.log('[PROCESS] Document already exists in manifest, continuing...');
+            } else {
+              throw error;
+            }
+          }
+
+          return res.status(200).json({ 
+            success: true, 
+            message: `✅ ${fileName} processed successfully!`,
+            completed: true  // Add this flag to indicate completion
+          });
+        } else {
+          throw new Error('Invalid phase specified');
         }
       })(),
       API_TIMEOUT,
       'document processing'
     );
-
-    return res.status(200).json({ 
-      success: true, 
-      message: `✅ ${fileName} processed successfully!` 
-    });
   } catch (error) {
     console.error('[PROCESS] Error processing document:', error);
     
