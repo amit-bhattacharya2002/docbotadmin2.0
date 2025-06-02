@@ -31,8 +31,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ContentType: contentType,
     });
 
-    // Increase expiration time to 2 hours (7200 seconds)
-    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 7200 });
+    // Set maximum expiration time (7 days = 604800 seconds)
+    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 604800 });
 
     res.status(200).json({ uploadUrl, fileKey });
   } catch (error) {
