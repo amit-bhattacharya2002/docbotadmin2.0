@@ -1,5 +1,6 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { Readable } from 'stream';
 
 // Get environment variables
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
@@ -151,13 +152,14 @@ export async function deleteFromManifest(namespace: string, documentId: string):
 }
 
 // Function to upload a file to R2
-export async function uploadToR2(file: Buffer, key: string): Promise<string> {
+export async function uploadToR2(file: Buffer | Readable, key: string, contentType?: string): Promise<string> {
   console.log('Uploading to R2 with key:', key);
   
   const command = new PutObjectCommand({
     Bucket: R2_BUCKET_NAME,
     Key: key,
     Body: file,
+    ContentType: contentType,
   });
 
   try {

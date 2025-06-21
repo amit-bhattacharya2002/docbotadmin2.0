@@ -93,6 +93,11 @@ export default function TabbedDocumentPanel({ namespace }: { namespace: string }
   const isInternal = namespace.includes("_Internal");
   const namespaceType = isInternal ? "Internal" : "External";
 
+  const handleUploadComplete = () => {
+    setActiveTab("Manage Document");
+    fetchDocuments(true);
+  };
+
   return (
     <div className="w-full bg-white/10 rounded-2xl shadow-xl p-0 border border-white/20 flex flex-col">
       <div className="flex">
@@ -110,16 +115,18 @@ export default function TabbedDocumentPanel({ namespace }: { namespace: string }
         </button>
       </div>
       <div className="p-8">
-        {activeTab === "Upload Document" && <UploadDocumentPanel namespace={namespace} onUpload={() => {
-          setActiveTab("Manage Document");
-          fetchDocuments(true); // Force refresh after upload
-        }}/>} 
+        {activeTab === "Upload Document" && (
+          <UploadDocumentPanel 
+            namespace={namespace} 
+            onUpload={handleUploadComplete}
+          />
+        )}
         {activeTab === "Manage Document" && (
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-white">Manage {namespaceType} Documents</h2>
               <button
-                onClick={() => fetchDocuments(true)} // Force refresh on manual refresh
+                onClick={() => fetchDocuments(true)}
                 className="p-2 rounded hover:bg-blue-500/20 transition flex items-center"
                 aria-label="Refresh documents"
                 disabled={loading}
@@ -136,7 +143,7 @@ export default function TabbedDocumentPanel({ namespace }: { namespace: string }
               loading={loading} 
               onDelete={async (id) => {
                 setDocuments(docs => docs.filter(doc => doc.id !== id));
-                await fetchDocuments(true); // Force refresh after deletion
+                await fetchDocuments(true);
               }} 
             />
           </div>
@@ -155,118 +162,128 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
   const namespaceType = isInternal ? "Internal" : "External";
   const eventSourceRef = useRef<EventSource | null>(null);
   const uploadCompleteRef = useRef(false);
-
-  // Debug logging for progress state changes
-  useEffect(() => {
-    console.log('Progress state updated:', progress);
-  }, [progress]);
+  const isProcessingRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file) return;
+    if (!file || loading || isProcessingRef.current) return;
     
     console.log('Starting upload process for file:', file.name);
     setLoading(true);
     setStatus(null);
     setProgress({ current: 0, total: 100, message: 'Initializing upload...', stage: 'uploading' });
     uploadCompleteRef.current = false;
+    isProcessingRef.current = true;
 
     const maxRetries = 3;
     let retryCount = 0;
 
     const uploadWithRetry = async () => {
       try {
-        // 1. Get pre-signed URL
-        const presignedResponse = await fetch('/api/documents/presigned-url', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            namespace,
-            fileName: file.name,
-            contentType: file.type,
-          }),
-        });
+        // 1. Upload to R2 using the upload endpoint
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('namespace', namespace);
 
-        if (!presignedResponse.ok) {
-          throw new Error('Failed to get upload URL');
-        }
-
-        const { uploadUrl, fileKey } = await presignedResponse.json();
-
-        // 2. Upload directly to R2 with retry logic
         setProgress({ current: 20, total: 100, message: 'Uploading to storage...', stage: 'uploading' });
         
-        const uploadResponse = await fetch(uploadUrl, {
-          method: 'PUT',
-          body: file,
-          headers: {
-            'Content-Type': file.type,
-          },
+        const uploadResponse = await fetch('/api/documents/upload', {
+          method: 'POST',
+          body: formData,
         });
 
         if (!uploadResponse.ok) {
           throw new Error('Failed to upload file');
         }
 
-        // 3. Process the uploaded file in batches
+        const { r2Url, hash } = await uploadResponse.json();
+
+        // 2. Process the uploaded file
         setProgress({ current: 40, total: 100, message: 'Processing document...', stage: 'processing' });
         
-        let currentPhase = 'embeddings';
-        let startBatch = 0;
-        let totalBatches = 0;
+        const processResponse = await fetch('/api/documents/process', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            namespace,
+            fileKey: r2Url,
+            fileName: file.name,
+            hash
+          }),
+        });
 
-        while (true) {
-          const processResponse = await fetch('/api/documents/process', {
+        if (!processResponse.ok) {
+          throw new Error('Failed to process file');
+        }
+
+        const data = await processResponse.json();
+        
+        // Update progress based on processing status
+        if (data.nextPhase === 'embeddings') {
+          // Continue processing with next batch
+          setProgress({ 
+            current: 40 + (data.currentBatch / data.totalBatches) * 60, 
+            total: 100, 
+            message: data.message, 
+            stage: 'processing' 
+          });
+          
+          // Process next batch
+          const nextProcessResponse = await fetch('/api/documents/process', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
               namespace,
-              fileKey,
+              fileKey: r2Url,
               fileName: file.name,
-              phase: currentPhase,
-              startBatch,
+              hash,
+              startBatch: data.nextBatch
             }),
           });
-
-          if (!processResponse.ok) {
-            throw new Error('Failed to process file');
-          }
-
-          const data = await processResponse.json();
           
-          // Update progress for embeddings phase
-          const progress = 40 + Math.floor((startBatch / data.totalBatches) * 30);
+          if (!nextProcessResponse.ok) {
+            throw new Error('Failed to process next batch');
+          }
+          
+          const nextData = await nextProcessResponse.json();
           setProgress({ 
-            current: progress, 
+            current: 100, 
+            total: 100, 
+            message: nextData.message, 
+            stage: 'complete' 
+          });
+          setStatus(nextData.message);
+        } else {
+          // Processing complete
+          setProgress({ 
+            current: 100, 
             total: 100, 
             message: data.message, 
-            stage: 'embedding' 
+            stage: 'complete' 
           });
-
-          if (data.completed) {
-            // Processing complete
-            setStatus(data.message);
-            setFile(null);
-            onUpload();
-            setProgress({ current: 100, total: 100, message: 'Upload complete!', stage: 'complete' });
-            uploadCompleteRef.current = true;
-            break;
-          }
-
-          // Continue with next batch
-          startBatch = data.nextBatch;
-          totalBatches = data.totalBatches;
+          setStatus(data.message);
         }
+
+        setFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ""; // Clear the file input
+        }
+        
+        // Ensure all state updates are complete before calling onUpload
+        await new Promise(resolve => setTimeout(resolve, 100));
+        uploadCompleteRef.current = true;
+        onUpload(); // Tell parent once
 
       } catch (error) {
         console.error('Upload error:', error);
         if (retryCount < maxRetries) {
           retryCount++;
-          const delay = Math.min(1000 * Math.pow(2, retryCount), 10000); // Exponential backoff, max 10s
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
           console.log(`Retrying upload in ${delay}ms (attempt ${retryCount}/${maxRetries})...`);
           setProgress(prev => ({ 
             ...prev!, 
@@ -288,20 +305,10 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
       setProgress(prev => ({ ...prev!, message: errorMessage, stage: 'error' }));
       uploadCompleteRef.current = true;
     } finally {
+      isProcessingRef.current = false;
       setLoading(false);
     }
   };
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (eventSourceRef.current && !uploadCompleteRef.current) {
-        console.log('Cleaning up EventSource on unmount - upload not complete');
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-    };
-  }, []);
 
   const getStageColor = (stage: string) => {
     switch (stage) {
@@ -328,6 +335,7 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
         <p className="text-gray-300 text-sm">Upload a document to the {namespaceType.toLowerCase()} namespace</p>
       </div>
       <input
+        ref={fileInputRef}
         type="file"
         className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
         onChange={e => setFile(e.target.files?.[0] || null)}
