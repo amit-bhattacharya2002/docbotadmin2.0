@@ -172,7 +172,7 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
     console.log('Starting upload process for file:', file.name);
     setLoading(true);
     setStatus(null);
-    setProgress({ current: 0, total: 100, message: 'Initializing upload...', stage: 'uploading' });
+    setProgress({ current: 0, total: 100, message: 'Requesting upload URL...', stage: 'uploading' });
     uploadCompleteRef.current = false;
     isProcessingRef.current = true;
 
@@ -181,27 +181,40 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
 
     const uploadWithRetry = async () => {
       try {
-        // 1. Upload to R2 using the upload endpoint
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('namespace', namespace);
-
-        setProgress({ current: 20, total: 100, message: 'Uploading to storage...', stage: 'uploading' });
-        
-        const uploadResponse = await fetch('/api/documents/upload', {
+        // 1. Request signed upload URL from backend
+        setProgress({ current: 10, total: 100, message: 'Requesting upload URL...', stage: 'uploading' });
+        const uploadUrlRes = await fetch('/api/documents/upload', {
           method: 'POST',
-          body: formData,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            contentType: file.type || 'application/octet-stream',
+            namespace,
+          }),
         });
-
-        if (!uploadResponse.ok) {
-          throw new Error('Failed to upload file');
+        if (!uploadUrlRes.ok) {
+          throw new Error('Failed to get upload URL');
+        }
+        const { uploadUrl, fileKey } = await uploadUrlRes.json();
+        if (!uploadUrl || !fileKey) {
+          throw new Error('Invalid upload URL response');
         }
 
-        const { r2Url, hash } = await uploadResponse.json();
+        // 2. Upload file directly to R2 using signed URL
+        setProgress({ current: 30, total: 100, message: 'Uploading to storage...', stage: 'uploading' });
+        const putRes = await fetch(uploadUrl, {
+          method: 'PUT',
+          body: file,
+          headers: {
+            'Content-Type': file.type || 'application/octet-stream',
+          },
+        });
+        if (!putRes.ok) {
+          throw new Error('Failed to upload file to storage');
+        }
 
-        // 2. Process the uploaded file
-        setProgress({ current: 40, total: 100, message: 'Processing document...', stage: 'processing' });
-        
+        // 3. Process the uploaded file
+        setProgress({ current: 60, total: 100, message: 'Processing document...', stage: 'processing' });
         const processResponse = await fetch('/api/documents/process', {
           method: 'POST',
           headers: {
@@ -209,28 +222,22 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
           },
           body: JSON.stringify({
             namespace,
-            fileKey: r2Url,
+            fileKey,
             fileName: file.name,
-            hash
           }),
         });
-
         if (!processResponse.ok) {
           throw new Error('Failed to process file');
         }
-
         const data = await processResponse.json();
-        
         // Update progress based on processing status
         if (data.nextPhase === 'embeddings') {
-          // Continue processing with next batch
           setProgress({ 
-            current: 40 + (data.currentBatch / data.totalBatches) * 60, 
+            current: 80, 
             total: 100, 
             message: data.message, 
             stage: 'processing' 
           });
-          
           // Process next batch
           const nextProcessResponse = await fetch('/api/documents/process', {
             method: 'POST',
@@ -239,17 +246,14 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
             },
             body: JSON.stringify({
               namespace,
-              fileKey: r2Url,
+              fileKey,
               fileName: file.name,
-              hash,
               startBatch: data.nextBatch
             }),
           });
-          
           if (!nextProcessResponse.ok) {
             throw new Error('Failed to process next batch');
           }
-          
           const nextData = await nextProcessResponse.json();
           setProgress({ 
             current: 100, 
@@ -259,7 +263,6 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
           });
           setStatus(nextData.message);
         } else {
-          // Processing complete
           setProgress({ 
             current: 100, 
             total: 100, 
@@ -268,23 +271,18 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
           });
           setStatus(data.message);
         }
-
         setFile(null);
         if (fileInputRef.current) {
-          fileInputRef.current.value = ""; // Clear the file input
+          fileInputRef.current.value = "";
         }
-        
-        // Ensure all state updates are complete before calling onUpload
         await new Promise(resolve => setTimeout(resolve, 100));
         uploadCompleteRef.current = true;
-        onUpload(); // Tell parent once
-
+        onUpload();
       } catch (error) {
         console.error('Upload error:', error);
         if (retryCount < maxRetries) {
           retryCount++;
           const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-          console.log(`Retrying upload in ${delay}ms (attempt ${retryCount}/${maxRetries})...`);
           setProgress(prev => ({ 
             ...prev!, 
             message: `Upload failed, retrying in ${delay/1000}s...`, 
@@ -293,17 +291,15 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
           await new Promise(resolve => setTimeout(resolve, delay));
           return uploadWithRetry();
         }
-        throw error;
+        const errorMessage = error instanceof Error ? error.message : 'Upload failed. Please try again.';
+        setStatus(errorMessage);
+        setProgress(prev => ({ ...prev!, message: errorMessage, stage: 'error' }));
+        uploadCompleteRef.current = true;
       }
     };
 
     try {
       await uploadWithRetry();
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Upload failed. Please try again.';
-      setStatus(errorMessage);
-      setProgress(prev => ({ ...prev!, message: errorMessage, stage: 'error' }));
-      uploadCompleteRef.current = true;
     } finally {
       isProcessingRef.current = false;
       setLoading(false);
