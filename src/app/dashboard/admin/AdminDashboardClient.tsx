@@ -19,7 +19,7 @@ export default function AdminDashboardClient({
   const [activeTab, setActiveTab] = useState("Internal Documents");
 
   return (
-    <div className="min-h-screen flex flex-col bg-black">
+    <div className="min-h-screen flex flex-col ">
       <DepartmentAdminHeader companyName={companyName} departmentName={departmentName} userName={userName} />
       <div className="flex flex-1">
         {/* Sidebar */}
@@ -32,7 +32,7 @@ export default function AdminDashboardClient({
             }`}
             onClick={() => setActiveTab("Internal Documents")}
           >
-            Internal Documents
+            <h2>Internal Documents</h2>
           </button>
           <button
             className={`px-6 py-3 text-left text-lg font-semibold transition-colors ${
@@ -42,14 +42,14 @@ export default function AdminDashboardClient({
             }`}
             onClick={() => setActiveTab("External Documents")}
           >
-            External Documents
+            <h2>External Documents</h2>
           </button>
         </aside>
         {/* Main Content */}
-        <main className="flex-1 p-8 overflow-auto">
+        <main className="flex-1 p-8 overflow-auto bg-[#101010] ">
           {activeTab === "Internal Documents" && (
             <div>
-              <h2 className="text-xl font-bold text-white mb-4">Internal Documents</h2>
+              <h2 className="text-xl md:text-4xl text-start font-bold  text-white my-10 border-b-2 border-white/20 pb-4">Internal Documents</h2>
               {internalNamespace ? (
                 <TabbedDocumentPanel namespace={internalNamespace} />
               ) : (
@@ -59,7 +59,7 @@ export default function AdminDashboardClient({
           )}
           {activeTab === "External Documents" && (
             <div>
-              <h2 className="text-xl font-bold text-white mb-4">External Documents</h2>
+              <h2 className="text-xl md:text-4xl text-start font-bold  text-white my-10 border-b-2 border-white/20 pb-4">External Documents</h2>
               {externalNamespace ? (
                 <TabbedDocumentPanel namespace={externalNamespace} />
               ) : (

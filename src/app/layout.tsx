@@ -1,15 +1,17 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Noto_Sans } from "next/font/google";
 import "./globals.css";
 
-const geist = Geist({ 
+const inter = Inter({
   subsets: ["latin"],
-  variable: '--font-geist'
+  variable: '--font-inter',
+  display: 'swap',
 });
 
-const geistMono = Geist_Mono({ 
+const noto = Noto_Sans({
   subsets: ["latin"],
-  variable: '--font-geist-mono'
+  variable: '--font-noto',
+  display: 'swap',
 });
 
 export const metadata: Metadata = {
@@ -23,10 +25,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geist.variable} ${geistMono.variable} font-mono`}>
+    <html lang="en" className={`${inter.variable} ${noto.variable}`}>
+      <body className="font-sans">
         <div className="min-h-screen flex flex-col">
-          <div className="flex-1 flex flex-col [&>h1]:font-geist [&>h2]:font-geist [&>h3]:font-geist [&>h4]:font-geist [&>h5]:font-geist [&>h6]:font-geist">
+          <div className="flex-1 flex flex-col">
             {children}
           </div>
         </div>

@@ -3,7 +3,6 @@ import { useState, useEffect, useRef } from "react";
 import { FiRefreshCw } from "react-icons/fi";
 
 export default function TabbedDocumentPanel({ namespace }: { namespace: string }) {
-  const [activeTab, setActiveTab] = useState("Upload Document");
   const [documents, setDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,15 +75,12 @@ export default function TabbedDocumentPanel({ namespace }: { namespace: string }
     };
   }, []);
 
-  // Fetch documents when Manage tab is active
+  // Fetch documents on mount and when namespace changes
   useEffect(() => {
-    if (activeTab === "Manage Document" && namespace) {
-      // Use setTimeout to ensure we don't fetch too frequently
-      fetchTimeoutRef.current = setTimeout(() => {
-        fetchDocuments(true);
-      }, 100);
+    if (namespace) {
+      fetchDocuments(true);
     }
-  }, [activeTab, namespace]);
+  }, [namespace]);
 
   if (!namespace) {
     return <div className="text-red-500">Error: No namespace found for your department.</div>;
@@ -94,60 +90,45 @@ export default function TabbedDocumentPanel({ namespace }: { namespace: string }
   const namespaceType = isInternal ? "Internal" : "External";
 
   const handleUploadComplete = () => {
-    setActiveTab("Manage Document");
     fetchDocuments(true);
   };
 
   return (
-    <div className="w-full bg-white/10 rounded-2xl shadow-xl p-0 border border-white/20 flex flex-col">
-      <div className="flex">
-        <button
-          className={`flex-1 px-6 py-3 rounded-tl-2xl font-semibold text-lg transition-colors ${activeTab === "Upload Document" ? "bg-blue-600 text-white" : "bg-white/10 text-white hover:bg-blue-500/30"}`}
-          onClick={() => setActiveTab("Upload Document")}
-        >
-          Upload {namespaceType} Document
-        </button>
-        <button
-          className={`flex-1 px-6 py-3 rounded-tr-2xl font-semibold text-lg transition-colors ${activeTab === "Manage Document" ? "bg-blue-600 text-white" : "bg-white/10 text-white hover:bg-blue-500/30"}`}
-          onClick={() => setActiveTab("Manage Document")}
-        >
-          Manage {namespaceType} Documents
-        </button>
-      </div>
-      <div className="p-8">
-        {activeTab === "Upload Document" && (
+    <div className="w-full bg-black rounded-2xl shadow-xl p-0 border border-white/20 flex flex-col">
+      <div className="flex flex-col md:flex-row gap-8 p-8">
+        {/* Upload Panel */}
+        <div className="w-full md:w-1/2">
           <UploadDocumentPanel 
             namespace={namespace} 
             onUpload={handleUploadComplete}
           />
-        )}
-        {activeTab === "Manage Document" && (
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-white">Manage {namespaceType} Documents</h2>
-              <button
-                onClick={() => fetchDocuments(true)}
-                className="p-2 rounded hover:bg-blue-500/20 transition flex items-center"
-                aria-label="Refresh documents"
-                disabled={loading}
-              >
-                <FiRefreshCw className={`h-6 w-6 text-blue-500 ${loading ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-            {error && (
-              <div className="text-red-400 text-sm mb-4">{error}</div>
-            )}
-            <ManageDocumentPanel 
-              namespace={namespace} 
-              documents={documents} 
-              loading={loading} 
-              onDelete={async (id) => {
-                setDocuments(docs => docs.filter(doc => doc.id !== id));
-                await fetchDocuments(true);
-              }} 
-            />
+        </div>
+        {/* Manage Panel */}
+        <div className="w-full md:w-1/2 ">
+          <div className="flex items-start justify-between mb-4">
+            <h2 className="text-lg  w-full text-start font-light text-white">Manage Uploaded {namespaceType} Documents</h2>
+            <button
+              onClick={() => fetchDocuments(true)}
+              className="p-2 rounded hover:bg-blue-500/20 transition flex items-start"
+              aria-label="Refresh documents"
+              disabled={loading}
+            >
+              <FiRefreshCw className={`h-6 w-6 text-blue-500 ${loading ? 'animate-spin' : ''}`} />
+            </button>
           </div>
-        )}
+          {error && (
+            <div className="text-red-400 text-sm mb-4">{error}</div>
+          )}
+          <ManageDocumentPanel 
+            namespace={namespace} 
+            documents={documents} 
+            loading={loading} 
+            onDelete={async (id) => {
+              setDocuments(docs => docs.filter(doc => doc.id !== id));
+              await fetchDocuments(true);
+            }} 
+          />
+        </div>
       </div>
     </div>
   );
@@ -164,6 +145,25 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
   const uploadCompleteRef = useRef(false);
   const isProcessingRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Hide success status after 2 seconds
+  useEffect(() => {
+    if (status && (status.toLowerCase().includes('success') || status.includes('✅'))) {
+      const timer = setTimeout(() => setStatus(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [status]);
+
+  // Hide success status and progress after 2 seconds
+  useEffect(() => {
+    if (status && (status.toLowerCase().includes('success') || status.includes('✅'))) {
+      const timer = setTimeout(() => {
+        setStatus(null);
+        setProgress(null);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [status]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -326,59 +326,63 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
   };
 
   return (
-    <form className="flex flex-col gap-4 items-center" onSubmit={handleSubmit}>
-      <div className="w-full text-center mb-2">
-        <p className="text-gray-300 text-sm">Upload a document to the {namespaceType.toLowerCase()} namespace</p>
+    <form className="flex flex-col gap-4 w-full h-full items-center" onSubmit={handleSubmit}>
+      <div className="w-full text-center mb-3">
+        <h2 className="text-white text-start text-lg font-light  ">Upload Document to {namespaceType} Namespace</h2>
       </div>
-      <input
-        ref={fileInputRef}
-        type="file"
-        className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
-        onChange={e => setFile(e.target.files?.[0] || null)}
-        accept=".pdf,.docx"
-      />
-      <button
-        type="submit"
-        className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        disabled={!file || loading}
-      >
-        {loading ? "Uploading..." : "Upload"}
-      </button>
-      
-      {progress && (
-        <div className="w-full max-w-md mt-2 bg-white/5 p-4 rounded-lg">
-          <div className="flex justify-between text-sm text-gray-300 mb-2">
-            <span className="font-medium">{progress.message}</span>
-            <span className="font-semibold">{Math.round((progress.current / progress.total) * 100)}%</span>
-          </div>
-          <div className="w-full bg-gray-700 rounded-full h-2.5">
-            <div 
-              className={`${getStageColor(progress.stage)} h-2.5 rounded-full transition-all duration-300 ease-out`}
-              style={{ width: `${(progress.current / progress.total) * 100}%` }}
-            />
-          </div>
-          <div className="mt-2 text-xs text-gray-400">
-            Stage: {progress.stage.charAt(0).toUpperCase() + progress.stage.slice(1)}
-          </div>
+      <div className="border-t-1 border-white/20  h-full w-full flex flex-col gap-4 items-center justify-start pt-20">
+        <div className="flex flex-row w-full border-2 rounded-lg bg-white/10 border-white/10 items-center p-10 gap-4">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
+            onChange={e => setFile(e.target.files?.[0] || null)}
+            accept=".pdf,.docx"
+          />
+          <button
+            type="submit"
+            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold w-full py-2 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!file || loading}
+          >
+            {loading ? "Uploading..." : "Upload"}
+          </button>
         </div>
-      )}
-      
-      {status && (
-        <div className={`text-sm mt-2 ${
-          status.includes('✅') ? 'text-green-400' : 
-          status.includes('already been uploaded') ? 'text-yellow-400' : 
-          'text-red-400'
-        }`}>
-          {status.includes('already been uploaded') ? (
-            <div className="flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-              </svg>
-              <span>{status}</span>
+        
+        {progress && (
+          <div className="w-full max-w-md mt-2 bg-white/5 p-4 rounded-lg">
+            <div className="flex justify-between text-sm text-gray-300 mb-2">
+              <span className="font-medium">{progress.message}</span>
+              <span className="font-semibold">{Math.round((progress.current / progress.total) * 100)}%</span>
             </div>
-          ) : status}
-        </div>
-      )}
+            <div className="w-full bg-gray-700 rounded-full h-2.5">
+              <div
+                className={`${getStageColor(progress.stage)} h-2.5 rounded-full transition-all duration-300 ease-out`}
+                style={{ width: `${(progress.current / progress.total) * 100}%` }}
+              />
+            </div>
+            <div className="mt-2 text-xs text-gray-400">
+              Stage: {progress.stage.charAt(0).toUpperCase() + progress.stage.slice(1)}
+            </div>
+          </div>
+        )}
+        
+        {status && (
+          <div className={`text-sm mt-2 ${
+            status.includes('✅') ? 'text-green-400' :
+            status.includes('already been uploaded') ? 'text-yellow-400' :
+            'text-red-400'
+          }`}>
+            {status.includes('already been uploaded') ? (
+              <div className="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <span>{status}</span>
+              </div>
+            ) : status}
+          </div>
+        )}
+      </div>
     </form>
   );
 }
@@ -451,7 +455,7 @@ function ManageDocumentPanel({ namespace, documents, loading, onDelete }: { name
   };
 
   return (
-    <div className="flex flex-col gap-4 items-center w-full">
+    <div className="flex flex-col gap-4 items-center border-t-1 border-white/20 pt-4 w-full overflow-y-auto h-[50vh]">
       {loading ? (
         <div className="text-gray-300">Loading...</div>
       ) : documents.length === 0 ? (
@@ -499,4 +503,4 @@ function ManageDocumentPanel({ namespace, documents, loading, onDelete }: { name
       )}
     </div>
   );
-} 
+}
