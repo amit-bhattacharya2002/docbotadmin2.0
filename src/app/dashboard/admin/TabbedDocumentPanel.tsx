@@ -462,43 +462,46 @@ function ManageDocumentPanel({ namespace, documents, loading, onDelete }: { name
         <div className="text-gray-300 text-center">No {namespaceType.toLowerCase()} documents uploaded yet.</div>
       ) : (
         <ul className="w-full space-y-2">
-          {documents.map(doc => (
-            <li key={doc.id} className="flex justify-between items-center bg-white/10 text-white px-4 py-3 rounded-lg">
-              <div className="flex flex-col flex-1">
-                <button 
-                  onClick={() => handleDownload(doc)}
-                  className="font-medium hover:text-blue-400 transition-colors cursor-pointer flex items-center gap-2 text-left"
+          {documents
+            .slice()
+            .sort((a, b) => a.source.localeCompare(b.source, undefined, { sensitivity: 'base' }))
+            .map(doc => (
+              <li key={doc.id} className="flex justify-between items-center bg-white/10 text-white px-4 py-3 rounded-lg">
+                <div className="flex flex-col flex-1">
+                  <button 
+                    onClick={() => handleDownload(doc)}
+                    className="font-medium hover:text-blue-400 transition-colors cursor-pointer flex items-center gap-2 text-left"
+                  >
+                    {doc.source}
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </button>
+                  <span className="text-xs text-gray-400">{new Date(doc.createdAt).toLocaleString()}</span>
+                  {deletingDocId === doc.id && deleteProgress && (
+                    <div className="mt-2">
+                      <div className="flex justify-between text-xs text-gray-400 mb-1">
+                        <span>Deleting document...</span>
+                        <span>{Math.round((deleteProgress.current / deleteProgress.total) * 100)}%</span>
+                      </div>
+                      <div className="w-full bg-gray-700 rounded-full h-1.5">
+                        <div 
+                          className="bg-red-500 h-1.5 rounded-full transition-all duration-300 ease-out"
+                          style={{ width: `${(deleteProgress.current / deleteProgress.total) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button
+                  className="text-red-400 hover:text-red-600 font-semibold text-sm px-3 py-1 rounded hover:bg-red-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ml-4"
+                  onClick={() => handleDelete(doc)}
+                  disabled={deletingDocId === doc.id}
                 >
-                  {doc.source}
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                  </svg>
+                  {deletingDocId === doc.id ? 'Deleting...' : 'Delete'}
                 </button>
-                <span className="text-xs text-gray-400">{new Date(doc.createdAt).toLocaleString()}</span>
-                {deletingDocId === doc.id && deleteProgress && (
-                  <div className="mt-2">
-                    <div className="flex justify-between text-xs text-gray-400 mb-1">
-                      <span>Deleting document...</span>
-                      <span>{Math.round((deleteProgress.current / deleteProgress.total) * 100)}%</span>
-                    </div>
-                    <div className="w-full bg-gray-700 rounded-full h-1.5">
-                      <div 
-                        className="bg-red-500 h-1.5 rounded-full transition-all duration-300 ease-out"
-                        style={{ width: `${(deleteProgress.current / deleteProgress.total) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-              <button
-                className="text-red-400 hover:text-red-600 font-semibold text-sm px-3 py-1 rounded hover:bg-red-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ml-4"
-                onClick={() => handleDelete(doc)}
-                disabled={deletingDocId === doc.id}
-              >
-                {deletingDocId === doc.id ? 'Deleting...' : 'Delete'}
-              </button>
-            </li>
-          ))}
+              </li>
+            ))}
         </ul>
       )}
     </div>
