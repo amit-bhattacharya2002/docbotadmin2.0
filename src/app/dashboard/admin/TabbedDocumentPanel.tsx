@@ -105,16 +105,20 @@ export default function TabbedDocumentPanel({ namespace }: { namespace: string }
         </div>
         {/* Manage Panel */}
         <div className="w-full md:w-1/2 ">
-          <div className="flex items-start justify-between mb-4">
-            <h2 className="text-lg  w-full text-start font-light text-white">Manage Uploaded {namespaceType} Documents</h2>
-            <button
-              onClick={() => fetchDocuments(true)}
-              className="p-2 rounded hover:bg-blue-500/20 transition flex items-start"
-              aria-label="Refresh documents"
-              disabled={loading}
-            >
-              <FiRefreshCw className={`h-6 w-6 text-blue-500 ${loading ? 'animate-spin' : ''}`} />
-            </button>
+          <div className="flex flex-col pb-3">
+            <div className="flex items-start justify-between ">
+              <h2 className="text-lg  w-full text-start font-bold text-white">Manage Uploaded Documents</h2>
+            
+              <button
+                onClick={() => fetchDocuments(true)}
+                className="p-2 rounded hover:bg-blue-500/20 transition flex items-start"
+                aria-label="Refresh documents"
+                disabled={loading}
+              >
+                <FiRefreshCw className={`h-6 w-6 text-blue-500 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+            <p className="text-gray-300 text-sm">Click the refresh button to refresh the list of documents</p>
           </div>
           {error && (
             <div className="text-red-400 text-sm mb-4">{error}</div>
@@ -327,8 +331,9 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
 
   return (
     <form className="flex flex-col gap-4 w-full h-full items-center" onSubmit={handleSubmit}>
-      <div className="w-full text-center mb-3">
-        <h2 className="text-white text-start text-lg font-light  ">Upload {namespaceType} Document</h2>
+      <div className="w-full text-start mb-0 gap-2 flex flex-col">
+        <h2 className="text-white text-lg font-bold  ">Upload Document</h2>
+        <p className="text-gray-300 text-sm">Select "Choose File" to select the file, then click "Upload"</p>
       </div>
       <div className="border-t-1 border-white/20  h-full w-full flex flex-col gap-4 items-center justify-start pt-20">
         <div className="flex flex-row w-full border-2 rounded-lg bg-white/10 border-white/10 items-center p-10 gap-4">
