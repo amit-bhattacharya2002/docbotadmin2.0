@@ -94,7 +94,7 @@ export default function TabbedDocumentPanel({ namespace }: { namespace: string }
   };
 
   return (
-    <div className="w-full bg-black rounded-2xl shadow-xl p-0 border border-white/20 flex flex-col">
+    <div className="w-full h-full bg-black rounded-2xl shadow-xl p-0 border border-white/20 flex flex-col flex-1 min-h-0">
       <div className="flex flex-col md:flex-row gap-8 p-8">
         {/* Upload Panel */}
         <div className="w-full md:w-1/2">
@@ -336,22 +336,31 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
         <p className="text-gray-300 text-sm">Select "Choose File" to select the file, then click "Upload"</p>
       </div>
       <div className="border-t-1 border-white/20  h-full w-full flex flex-col gap-4 items-center justify-start pt-20">
-        <div className="flex flex-row w-full border-2 rounded-lg bg-white/10 border-white/10 items-center p-10 gap-4">
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
-            onChange={e => setFile(e.target.files?.[0] || null)}
-            accept=".pdf,.docx"
-            placeholder="Choose a file..."
-          />
-          <button
-            type="submit"
-            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold w-full py-2 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={!file || loading}
-          >
-            {loading ? "Uploading..." : "Upload"}
-          </button>
+        <div className="flex flex-col w-full border-2 rounded-lg bg-white/10 border-white/10 p-1 sm:p-2 sm:py-5 gap-4">
+          <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center w-full">
+            <div className="flex-1 min-w-0 flex flex-col gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="block w-full text-xs text-gray-300 file:mr-4 file:text-xs file:py-2 file:px-4 file:rounded-lg file:border-0 file:font-semibold file:bg-blue-600  file:text-white hover:file:bg-blue-700"
+                onChange={e => setFile(e.target.files?.[0] || null)}
+                accept=".pdf,.docx"
+                placeholder="Choose a file..."
+              />
+            </div>
+            <button
+              type="submit"
+              className="bg-blue-600 hover:bg-blue-700 text-xs text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap w-full sm:w-auto flex-shrink-0"
+              disabled={!file || loading}
+            >
+              {loading ? "Uploading..." : "Upload"}
+            </button>
+          </div>
+          {file && (
+            <div className="text-sm text-gray-300 px-2 py-2 bg-white/5 rounded border border-white/10 break-words overflow-wrap-anywhere" title={file.name}>
+              <span className="font-semibold text-blue-400">Selected file:</span> <span className="ml-2">{file.name}</span>
+            </div>
+          )}
         </div>
         
         {progress && (
