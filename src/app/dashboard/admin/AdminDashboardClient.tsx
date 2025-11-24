@@ -9,12 +9,16 @@ export default function AdminDashboardClient({
   userName,
   internalNamespace,
   externalNamespace,
+  companyId,
+  departmentId,
 }: {
   companyName: string;
   departmentName: string;
   userName: string;
   internalNamespace: string;
   externalNamespace: string;
+  companyId: string;
+  departmentId: string;
 }) {
   const [activeTab, setActiveTab] = useState("Internal Documents");
 
@@ -49,7 +53,32 @@ export default function AdminDashboardClient({
         <main className="flex-1 p-8 overflow-auto bg-[#101010] ">
           {activeTab === "Internal Documents" && (
             <div>
-              <h2 className="text-xl md:text-4xl text-start font-bold  text-white my-10 border-b-2 border-white/20 pb-4">Internal Documents</h2>
+              <h2 className="text-xl md:text-4xl text-start font-bold text-white my-10 border-b-2 border-white/20 pb-4">Internal Documents</h2>
+
+              {/* Docbot Client Link - Always Visible */}
+              {companyId && departmentId && (
+                <div className="mb-6 bg-white/5 border border-white/20 rounded p-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`https://docbot.meaningfulinnovations.org/company/${companyId}/department/${departmentId}`}
+                      className="flex-1 bg-white/10 text-white text-xs px-3 py-1.5 rounded border border-white/20 focus:outline-none"
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(`https://docbot.meaningfulinnovations.org/company/${companyId}/department/${departmentId}`);
+                        alert('Link copied to clipboard!');
+                      }}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded transition-colors whitespace-nowrap"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <div className="mt-2 text-xs text-gray-400">Share this link with users to access the Docbot client.</div>
+                </div>
+              )}
+
               {internalNamespace ? (
                 <TabbedDocumentPanel namespace={internalNamespace} />
               ) : (
