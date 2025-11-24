@@ -1,7 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
 import { signOut } from "next-auth/react";
-import { FiLink } from "react-icons/fi";
 
 type DepartmentAdminGroup = {
   departmentId: string;
@@ -42,7 +41,6 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
   const [refreshingAdmins, setRefreshingAdmins] = useState(false);
   const [refreshingDepts, setRefreshingDepts] = useState(false);
   const [localDepartmentAdmins, setLocalDepartmentAdmins] = useState<DepartmentAdminGroup[]>(departmentAdmins);
-  const [expandedDeptLinks, setExpandedDeptLinks] = useState<Record<string, boolean>>({});
 
   const handleRefreshAdmins = async () => {
     setRefreshingAdmins(true);
@@ -288,51 +286,15 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                 </div>
                 <ul className="space-y-2">
                   {departments.map((dept) => (
-                    <li key={dept.id} className="bg-white/20 text-white px-4 py-2 rounded-lg">
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-3 flex-1">
-                          <span className="font-semibold">{dept.name}</span>
-                          {/* Docbot Client Link Toggle */}
-                          {company && (
-                            <button
-                              onClick={() => setExpandedDeptLinks(prev => ({ ...prev, [dept.id]: !prev[dept.id] }))}
-                              className="text-xs text-blue-400 hover:text-blue-300 underline flex items-center gap-1"
-                            >
-                              <FiLink className="w-3 h-3" />
-                              {expandedDeptLinks[dept.id] ? 'Hide Docbot Client Link' : 'Show Docbot Client Link'}
-                            </button>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleDeleteDepartment(dept.id)}
-                          disabled={deletingDept === dept.id}
-                          className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition-colors disabled:opacity-50"
-                        >
-                          {deletingDept === dept.id ? "Deleting..." : "Delete"}
-                        </button>
-                      </div>
-                      {/* Collapsible Docbot Client Link */}
-                      {company && expandedDeptLinks[dept.id] && (
-                        <div className="mt-2 bg-white/5 border border-white/20 rounded p-2">
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="text"
-                              readOnly
-                              value={`https://docbot.meaningfulinnovations.org/company/${company.id}/department/${dept.id}`}
-                              className="flex-1 bg-white/10 text-white text-xs px-2 py-1 rounded border border-white/20 focus:outline-none"
-                            />
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(`https://docbot.meaningfulinnovations.org/company/${company.id}/department/${dept.id}`);
-                                alert('Link copied to clipboard!');
-                              }}
-                              className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors whitespace-nowrap"
-                            >
-                              Copy
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                    <li key={dept.id} className="bg-white/20 text-white px-4 py-2 rounded-lg flex justify-between items-center">
+                      <span>{dept.name}</span>
+                      <button
+                        onClick={() => handleDeleteDepartment(dept.id)}
+                        disabled={deletingDept === dept.id}
+                        className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition-colors disabled:opacity-50"
+                      >
+                        {deletingDept === dept.id ? "Deleting..." : "Delete"}
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -408,43 +370,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                 {localDepartmentAdmins.length === 0 && <div className="text-gray-400">No Department Admins found.</div>}
                 {localDepartmentAdmins.map((group) => (
                   <div key={group.departmentId} className="mb-8">
-                    <div className="flex items-center gap-3 mb-2 pl-1">
-                      <div className="text-base font-medium text-blue-400 uppercase tracking-wide">{group.departmentName}</div>
-                      {/* Docbot Client Link Toggle */}
-                      {company && (
-                        <button
-                          onClick={() => setExpandedDeptLinks(prev => ({ ...prev, [`admin-${group.departmentId}`]: !prev[`admin-${group.departmentId}`] }))}
-                          className="text-xs text-blue-400 hover:text-blue-300 underline flex items-center gap-1"
-                        >
-                          <FiLink className="w-3 h-3" />
-                          {expandedDeptLinks[`admin-${group.departmentId}`] ? 'Hide Docbot Client Link' : 'Show Docbot Client Link'}
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Collapsible Docbot Client Link */}
-                    {company && expandedDeptLinks[`admin-${group.departmentId}`] && (
-                      <div className="mb-3 bg-white/5 border border-white/20 rounded p-2">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            readOnly
-                            value={`https://docbot.meaningfulinnovations.org/company/${company.id}/department/${group.departmentId}`}
-                            className="flex-1 bg-white/10 text-white text-xs px-2 py-1 rounded border border-white/20 focus:outline-none"
-                          />
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(`https://docbot.meaningfulinnovations.org/company/${company.id}/department/${group.departmentId}`);
-                              alert('Link copied to clipboard!');
-                            }}
-                            className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors whitespace-nowrap"
-                          >
-                            Copy
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
+                    <div className="text-base font-medium text-blue-400 mb-2 uppercase tracking-wide pl-1">{group.departmentName}</div>
                     {group.admins.length === 0 ? (
                       <div className="text-gray-400 text-sm mb-2 pl-1">No admins for this department.</div>
                     ) : (
