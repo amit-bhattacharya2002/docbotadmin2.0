@@ -328,7 +328,7 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
   return (
     <form className="flex flex-col gap-4 w-full h-full items-center" onSubmit={handleSubmit}>
       <div className="w-full text-center mb-3">
-        <h2 className="text-white text-start text-lg font-light  ">Upload Document to {namespaceType} Namespace</h2>
+        <h2 className="text-white text-start text-lg font-light  ">Upload {namespaceType} Document</h2>
       </div>
       <div className="border-t-1 border-white/20  h-full w-full flex flex-col gap-4 items-center justify-start pt-20">
         <div className="flex flex-row w-full border-2 rounded-lg bg-white/10 border-white/10 items-center p-10 gap-4">
@@ -338,6 +338,7 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
             className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
             onChange={e => setFile(e.target.files?.[0] || null)}
             accept=".pdf,.docx"
+            placeholder="Choose a file..."
           />
           <button
             type="submit"

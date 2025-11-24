@@ -73,6 +73,8 @@ export default async function AdminDashboard() {
       userName={user.name}
       internalNamespace={internalNamespace}
       externalNamespace={externalNamespace}
+      companyId={user.companyId || ""}
+      departmentId={user.departmentId || ""}
     />
   );
 } 
