@@ -335,7 +335,7 @@ function UploadDocumentPanel({ namespace, onUpload }: { namespace: string, onUpl
         <h2 className="text-white text-lg font-bold  ">Upload Document</h2>
         <p className="text-gray-300 text-sm">Select "Choose File" to select the file, then click "Upload"</p>
       </div>
-      <div className="border-t-1 border-white/20  h-full w-full flex flex-col gap-4 items-center justify-start pt-20">
+      <div className="border-t-1 border-white/20  h-full w-full flex flex-col gap-4 items-center justify-start pt-4">
         <div className="flex flex-col w-full border-2 rounded-lg bg-white/10 border-white/10 p-1 sm:p-2 sm:py-5 gap-4">
           <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center w-full">
             <div className="flex-1 min-w-0 flex flex-col gap-2">
