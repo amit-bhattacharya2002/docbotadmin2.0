@@ -42,6 +42,9 @@ export interface DocumentManifest {
   createdAt: string;
   namespace: string;
   hash?: string;
+  // FAQ document support
+  documentType?: 'faq' | 'standard';
+  chunkCount?: number;
 }
 
 export async function getManifestFromR2(namespace: string): Promise<DocumentManifest[]> {
