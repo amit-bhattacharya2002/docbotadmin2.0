@@ -13,7 +13,7 @@ export default function DepartmentAdminHeader({ companyName, departmentName, use
   };
 
   return (
-    <header className="flex items-center h-[10vh] justify-between px-8 py-4 bg-white/10 backdrop-blur-lg border-b border-white/20">
+    <header className="flex items-center h-[10vh] justify-between px-8 py-4 bg-white/10 backdrop-blur-lg border-b border-white/20 relative z-50">
       <div className="flex items-center justify-center gap-2 text-white text-2xl font-bold">
         <span>{companyName}</span>
         <span className="text-blue-400 font-semibold">Docbot Admin</span>
@@ -29,7 +29,7 @@ export default function DepartmentAdminHeader({ companyName, departmentName, use
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
         </button>
         {dropdownOpen && (
-          <div className="absolute right-0 mt-2 w-40 bg-white/90 rounded-lg shadow-lg z-10">
+          <div className="absolute right-0 mt-2 w-40 bg-white/90 rounded-lg shadow-lg z-50">
             <div className="px-4 py-2 text-gray-800 border-b">{userName || "User"}</div>
             <button
               className="w-full px-4 py-2 text-left text-red-600 hover:bg-gray-100 rounded-b-lg disabled:opacity-60"
