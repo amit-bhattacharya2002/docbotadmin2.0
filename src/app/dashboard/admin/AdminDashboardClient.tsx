@@ -1,6 +1,7 @@
 'use client';
 import DepartmentAdminHeader from "./DepartmentAdminHeader";
 import TabbedDocumentPanel from "./TabbedDocumentPanel";
+import FAQGeneratorPanel from "./FAQGeneratorPanel";
 import { useState } from "react";
 import { FiMenu, FiX } from "react-icons/fi";
 
@@ -62,6 +63,16 @@ export default function AdminDashboardClient({
           >
             <h2>External Documents</h2>
           </button>
+          <button
+            className={`px-6 py-3 text-left text-lg font-semibold transition-colors ${
+              activeTab === "FAQ Generator"
+                ? "bg-blue-600 text-white"
+                : "text-gray-300 hover:bg-blue-500/20"
+            }`}
+            onClick={() => setActiveTab("FAQ Generator")}
+          >
+            <h2>FAQ Generator</h2>
+          </button>
         </aside>
         
         {/* Sidebar Toggle Button (when collapsed) */}
@@ -106,7 +117,7 @@ export default function AdminDashboardClient({
 
               {internalNamespace ? (
                 <div className="flex-1 flex flex-col min-h-0">
-                  <TabbedDocumentPanel namespace={internalNamespace} />
+                <TabbedDocumentPanel namespace={internalNamespace} />
                 </div>
               ) : (
                 <div className="text-red-500 bg-white/10 rounded-2xl p-8">Internal namespace not configured for your department.</div>
@@ -139,11 +150,16 @@ export default function AdminDashboardClient({
 
               {externalNamespace ? (
                 <div className="flex-1 flex flex-col min-h-0">
-                  <TabbedDocumentPanel namespace={externalNamespace} />
+                <TabbedDocumentPanel namespace={externalNamespace} />
                 </div>
               ) : (
                 <div className="text-red-500 bg-white/10 rounded-2xl p-8">External namespace not configured for your department.</div>
               )}
+            </div>
+          )}
+          {activeTab === "FAQ Generator" && (
+            <div className="flex-1 flex flex-col min-h-0">
+              <FAQGeneratorPanel companyName={companyName} departmentName={departmentName} />
             </div>
           )}
         </main>

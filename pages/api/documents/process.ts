@@ -272,6 +272,312 @@ function calculateConfidence(text: string, contactInfo: any): number {
   return Math.max(0, Math.min(1, score));
 }
 
+// ============================================================================
+// FAQ-OPTIMIZED CHUNKING (Additive)
+// Detects FAQ-style documents and chunks by Q&A pairs to preserve context
+// ============================================================================
+
+interface FAQChunk {
+  text: string;
+  question: string;
+  answer: string;
+  links: string[];
+  detailsLinks: string[];
+  chunkIndex: number;
+  chunkType: 'faq_pair' | 'complete_faq' | 'partial_faq';
+  isComplete: boolean;
+  keywords: string[];
+  partIndex?: number;
+  originalQuestion?: string;
+}
+
+/**
+ * Detect if a document is FAQ-style by checking for Q&A patterns
+ */
+function isFAQDocument(text: string): boolean {
+  // Multiple patterns to detect FAQ structure
+  const patterns = [
+    /Question:\s*.+?\s*Answer:/gi,
+    /Q:\s*.+?\s*A:/gi,
+    /^\s*\d+\.\s*.+\?\s*\n/gm,  // Numbered questions ending with ?
+    /^#+\s*.+\?\s*$/gm,         // Markdown headers with questions
+  ];
+
+  let matchCount = 0;
+  for (const pattern of patterns) {
+    const matches = text.match(pattern);
+    if (matches) {
+      matchCount += matches.length;
+    }
+  }
+
+  // Consider it FAQ if we find at least 3 Q&A-like patterns
+  return matchCount >= 3;
+}
+
+/**
+ * Extract keywords from text for better search
+ */
+function extractKeywords(text: string): string[] {
+  const stopWords = new Set([
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of',
+    'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
+    'may', 'might', 'must', 'shall', 'can', 'need', 'dare', 'ought', 'used',
+    'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they',
+    'what', 'which', 'who', 'whom', 'whose', 'where', 'when', 'why', 'how'
+  ]);
+
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length > 3 && !stopWords.has(word))
+    .slice(0, 10);
+}
+
+/**
+ * Extract all URLs from text
+ */
+function extractLinks(text: string): string[] {
+  const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g;
+  return text.match(urlPattern) || [];
+}
+
+/**
+ * Extract "Details:" links specifically
+ */
+function extractDetailsLinks(text: string): string[] {
+  const detailsPattern = /Details:\s*(https?:\/\/[^\s<>"{}|\\^`[\]]+)/gi;
+  const links: string[] = [];
+  let match;
+  while ((match = detailsPattern.exec(text)) !== null) {
+    links.push(match[1]);
+  }
+  return links;
+}
+
+/**
+ * FAQ-optimized chunking: Each Q&A pair becomes one chunk
+ * Preserves complete information, hyperlinks, and context
+ */
+function chunkFAQDocument(text: string): FAQChunk[] {
+  const chunks: FAQChunk[] = [];
+
+  // Try multiple FAQ patterns
+  const patterns = [
+    // "Question: ... Answer: ..." format
+    /Question:\s*([^\n]+(?:\n(?!Answer:)[^\n]*)*)\s*Answer:\s*([^]*?)(?=Question:|$)/gi,
+    // "Q: ... A: ..." format
+    /Q:\s*([^\n]+(?:\n(?!A:)[^\n]*)*)\s*A:\s*([^]*?)(?=Q:|$)/gi,
+  ];
+
+  let bestMatches: Array<{ question: string; answer: string }> = [];
+
+  for (const pattern of patterns) {
+    const matches: Array<{ question: string; answer: string }> = [];
+    let match;
+    const testText = text;
+    pattern.lastIndex = 0; // Reset regex state
+
+    while ((match = pattern.exec(testText)) !== null) {
+      const question = match[1].trim();
+      const answer = match[2].trim();
+      if (question.length > 5 && answer.length > 10) {
+        matches.push({ question, answer });
+      }
+    }
+
+    if (matches.length > bestMatches.length) {
+      bestMatches = matches;
+    }
+  }
+
+  // If no structured patterns found, try to detect numbered questions
+  if (bestMatches.length === 0) {
+    const numberedPattern = /(\d+)\.\s*([^\n]+\?)\s*\n([^]*?)(?=\d+\.\s*[^\n]+\?|$)/gi;
+    let match;
+    while ((match = numberedPattern.exec(text)) !== null) {
+      const question = match[2].trim();
+      const answer = match[3].trim();
+      if (question.length > 5 && answer.length > 10) {
+        bestMatches.push({ question, answer });
+      }
+    }
+  }
+
+  // Build chunks from matches
+  let chunkIndex = 0;
+  for (const { question, answer } of bestMatches) {
+    const links = extractLinks(answer);
+    const detailsLinks = extractDetailsLinks(answer);
+    const fullText = `Question: ${question}\n\nAnswer: ${answer}`;
+
+    chunks.push({
+      text: fullText,
+      question,
+      answer,
+      links,
+      detailsLinks,
+      chunkIndex: chunkIndex++,
+      chunkType: 'faq_pair',
+      isComplete: true,
+      keywords: extractKeywords(question),
+    });
+  }
+
+  return chunks;
+}
+
+/**
+ * Hybrid chunking: Keep Q&A together, but split long answers intelligently
+ */
+function chunkFAQDocumentHybrid(text: string, maxChunkSize = 2000): FAQChunk[] {
+  const chunks: FAQChunk[] = [];
+  const faqPattern = /Question:\s*([^\n]+(?:\n(?!Answer:)[^\n]*)*)\s*Answer:\s*([^]*?)(?=Question:|$)/gi;
+
+  let match;
+  let globalChunkIndex = 0;
+
+  while ((match = faqPattern.exec(text)) !== null) {
+    const question = match[1].trim();
+    const answer = match[2].trim();
+    const fullText = `Question: ${question}\n\nAnswer: ${answer}`;
+
+    // If Q&A pair is small enough, keep it as one chunk
+    if (fullText.length <= maxChunkSize) {
+      chunks.push({
+        text: fullText,
+        question,
+        answer,
+        links: extractLinks(answer),
+        detailsLinks: extractDetailsLinks(answer),
+        chunkIndex: globalChunkIndex++,
+        chunkType: 'complete_faq',
+        isComplete: true,
+        keywords: extractKeywords(question),
+      });
+    } else {
+      // Split long answer by sentences, but keep question with each part
+      const sentences = answer.match(/[^.!?]+[.!?]+/g) || [answer];
+      let currentAnswer = '';
+      let partIndex = 0;
+
+      for (const sentence of sentences) {
+        if ((currentAnswer + sentence).length > maxChunkSize && currentAnswer.length > 0) {
+          // Create chunk with question + partial answer
+          chunks.push({
+            text: `Question: ${question}\n\nAnswer (Part ${partIndex + 1}): ${currentAnswer}`,
+            question,
+            answer: currentAnswer,
+            links: extractLinks(currentAnswer),
+            detailsLinks: extractDetailsLinks(currentAnswer),
+            chunkIndex: globalChunkIndex++,
+            chunkType: 'partial_faq',
+            isComplete: false,
+            keywords: extractKeywords(question),
+            partIndex: partIndex++,
+            originalQuestion: question,
+          });
+          currentAnswer = sentence;
+        } else {
+          currentAnswer += sentence;
+        }
+      }
+
+      // Add remaining content
+      if (currentAnswer.length > 0) {
+        chunks.push({
+          text: `Question: ${question}\n\nAnswer (Part ${partIndex + 1}): ${currentAnswer}`,
+          question,
+          answer: currentAnswer,
+          links: extractLinks(currentAnswer),
+          detailsLinks: extractDetailsLinks(currentAnswer),
+          chunkIndex: globalChunkIndex++,
+          chunkType: 'partial_faq',
+          isComplete: false,
+          keywords: extractKeywords(question),
+          partIndex,
+          originalQuestion: question,
+        });
+      }
+    }
+  }
+
+  return chunks;
+}
+
+/**
+ * Calculate confidence score for FAQ chunks
+ */
+function calculateFAQConfidence(chunk: FAQChunk): number {
+  let score = 0.8; // Base score for FAQ chunks
+
+  // Boost for complete Q&A pairs
+  if (chunk.isComplete) {
+    score += 0.1;
+  }
+
+  // Boost for chunks with links
+  if (chunk.links && chunk.links.length > 0) {
+    score += 0.05;
+  }
+
+  // Boost for chunks with keywords
+  if (chunk.keywords && chunk.keywords.length > 3) {
+    score += 0.05;
+  }
+
+  return Math.min(1.0, score);
+}
+
+/**
+ * Build enhanced metadata for FAQ chunks
+ */
+function buildEnhancedFAQMetadata(
+  chunk: FAQChunk,
+  fileName: string,
+  fileKey: string
+): Record<string, any> {
+  return {
+    source: fileName,
+    r2Url: fileKey,
+    text: chunk.text.slice(0, 2000),
+
+    // FAQ-specific metadata
+    question: chunk.question.slice(0, 500),
+    answer: chunk.answer.slice(0, 1500),
+    chunkType: chunk.chunkType,
+    isComplete: chunk.isComplete,
+
+    // Links and references
+    links: chunk.links.slice(0, 10),
+    detailsLinks: chunk.detailsLinks.slice(0, 5),
+    hasLinks: chunk.links.length > 0,
+
+    // Search optimization
+    keywords: chunk.keywords,
+
+    // Chunking info
+    chunkIndex: chunk.chunkIndex,
+    partIndex: chunk.partIndex,
+    originalQuestion: chunk.originalQuestion,
+
+    // Confidence scoring
+    confidence: calculateFAQConfidence(chunk),
+
+    // Document type marker
+    documentType: 'faq',
+
+    // Timestamp
+    createdAt: new Date().toISOString(),
+  };
+}
+
+// ============================================================================
+// END FAQ-OPTIMIZED CHUNKING
+// ============================================================================
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -352,7 +658,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         console.log(`[PROCESS] Created ${blockData.length} blocks of up to 5 pages each`);
         console.log(`[PROCESS] Total pages processed: ${blockData.reduce((acc, block) => acc + (block.pageEnd - block.pageStart + 1), 0)}`);
 
-        // Process chunks with progress tracking
+        // Combine all text to detect document type
+        const fullDocumentText = blockData.map(b => b.text).join('\n\n');
+        const isDocumentFAQ = isFAQDocument(fullDocumentText);
+        console.log(`[PROCESS] Document type: ${isDocumentFAQ ? 'FAQ' : 'Standard'}`);
+
+        // Update progress for chunking
+        progress.phase = 'chunking';
+        progress.message = isDocumentFAQ ? 'Chunking FAQ document by Q&A pairs...' : 'Splitting into chunks...';
+
+        console.log('[PROCESS] Starting chunking phase');
+
+        // =====================================================================
+        // FAQ-OPTIMIZED PATH: Chunk by Q&A pairs
+        // =====================================================================
+        let faqChunks: FAQChunk[] = [];
+        if (isDocumentFAQ) {
+          console.log('[PROCESS] Using FAQ-optimized chunking strategy');
+          
+          // First try standard FAQ chunking
+          faqChunks = chunkFAQDocument(fullDocumentText);
+          
+          // If chunks are too large, use hybrid approach
+          const avgChunkSize = faqChunks.length > 0 
+            ? faqChunks.reduce((acc, c) => acc + c.text.length, 0) / faqChunks.length 
+            : 0;
+          
+          if (avgChunkSize > 2500 || faqChunks.length === 0) {
+            console.log('[PROCESS] FAQ chunks too large or none found, using hybrid approach');
+            faqChunks = chunkFAQDocumentHybrid(fullDocumentText, 2000);
+          }
+          
+          console.log(`[PROCESS] Created ${faqChunks.length} FAQ chunks`);
+          if (faqChunks.length > 0) {
+            console.log(`[PROCESS] Sample FAQ question: "${faqChunks[0].question.slice(0, 80)}..."`);
+          }
+        }
+
+        // =====================================================================
+        // STANDARD PATH: Fixed-size chunking (original logic)
+        // =====================================================================
         const allChunks: Array<{
           text: string;
           pageStart: number;
@@ -360,174 +705,309 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           hash: string;
         }> = [];
 
-        // Update progress for chunking
-        progress.phase = 'chunking';
-        progress.message = 'Splitting into chunks...';
+        if (!isDocumentFAQ || faqChunks.length === 0) {
+          // Fall back to standard chunking if not FAQ or FAQ parsing failed
+          if (isDocumentFAQ && faqChunks.length === 0) {
+            console.log('[PROCESS] FAQ detection succeeded but no Q&A pairs found, falling back to standard chunking');
+          }
 
-        console.log('[PROCESS] Starting chunking phase');
-        const seenChunks = new Set<string>();
+          const seenChunks = new Set<string>();
 
-        for (const { text, pageStart, pageEnd } of blockData) {
-          const subChunks = splitText([text], 3000, 150);
-          console.log(`[PROCESS] Block ${pageStart}-${pageEnd}: Split into ${subChunks.length} subchunks`);
-          
-          for (const sub of subChunks) {
-            const chunkHash = crypto.createHash('sha256')
-              .update(sub)
-              .digest('hex')
-              .slice(0, 32);
+          for (const { text, pageStart, pageEnd } of blockData) {
+            const subChunks = splitText([text], 3000, 150);
+            console.log(`[PROCESS] Block ${pageStart}-${pageEnd}: Split into ${subChunks.length} subchunks`);
+            
+            for (const sub of subChunks) {
+              const chunkHash = crypto.createHash('sha256')
+                .update(sub)
+                .digest('hex')
+                .slice(0, 32);
 
-            if (!seenChunks.has(chunkHash)) {
-              seenChunks.add(chunkHash);
-              allChunks.push({ 
-                text: sub, 
-                pageStart, 
-                pageEnd,
-                hash: chunkHash 
-              });
-            } else {
-              console.log(`[PROCESS] Skipping duplicate chunk in pages ${pageStart}-${pageEnd}`);
+              if (!seenChunks.has(chunkHash)) {
+                seenChunks.add(chunkHash);
+                allChunks.push({ 
+                  text: sub, 
+                  pageStart, 
+                  pageEnd,
+                  hash: chunkHash 
+                });
+              } else {
+                console.log(`[PROCESS] Skipping duplicate chunk in pages ${pageStart}-${pageEnd}`);
+              }
             }
           }
+
+          console.log(`[PROCESS] Final unique chunk count: ${allChunks.length}`);
+          console.log(`[PROCESS] Average chunk size: ${Math.round(allChunks.reduce((acc, chunk) => acc + chunk.text.length, 0) / allChunks.length)} characters`);
         }
 
-        console.log(`[PROCESS] Final unique chunk count: ${allChunks.length}`);
-        console.log(`[PROCESS] Average chunk size: ${Math.round(allChunks.reduce((acc, chunk) => acc + chunk.text.length, 0) / allChunks.length)} characters`);
+        // Determine which chunks to process
+        const usingFAQChunks = isDocumentFAQ && faqChunks.length > 0;
+        const effectiveChunkCount = usingFAQChunks ? faqChunks.length : allChunks.length;
+        console.log(`[PROCESS] Processing ${effectiveChunkCount} chunks using ${usingFAQChunks ? 'FAQ' : 'standard'} strategy`);
 
         if (phase === 'embeddings') {
           const { startBatch = 0 } = req.body;
 
-          // Group chunks into smaller embedding batches
-          const embeddingBatches: Array<
-            Array<{ text: string; pageStart: number; pageEnd: number; hash: string }>
-          > = [];
-          for (let i = 0; i < allChunks.length; i += EMBEDDING_BATCH_SIZE) {
-            embeddingBatches.push(allChunks.slice(i, i + EMBEDDING_BATCH_SIZE));
-          }
-
-          console.log(`[PROCESS] Created ${embeddingBatches.length} embedding batches of size ${EMBEDDING_BATCH_SIZE}`);
-
-          // Process fewer batches per request
-          const BATCHES_PER_CALL = 10;
-          const endBatch = Math.min(startBatch + BATCHES_PER_CALL, embeddingBatches.length);
-          const currentBatches = embeddingBatches.slice(startBatch, endBatch);
-
-          console.log(`[PROCESS] Processing embedding batches ${startBatch + 1} to ${endBatch} of ${embeddingBatches.length}`);
-
-          // Update progress for embedding
-          progress.phase = 'embedding';
-          progress.message = `Processing embedding batch ${startBatch + 1} of ${embeddingBatches.length}`;
-
-          // Generate embeddings
-          const allEmbeddings: any[] = [];
-          for (let i = 0; i < currentBatches.length; i++) {
-            const texts = currentBatches[i].map(c => c.text);
-            console.log(`[PROCESS] Generating embeddings for batch ${startBatch + i + 1} (${texts.length} chunks)`);
-            const batchEmbeddings = await retryWithBackoff(async () => {
-              const resp = await openai.embeddings.create({
-                model: 'text-embedding-ada-002',
-                input: texts
-              });
-              return resp.data.map((d: any) => d.embedding);
-            });
-            allEmbeddings.push(...batchEmbeddings);
-            console.log(`[PROCESS] Successfully generated embeddings for batch ${startBatch + i + 1}`);
-
-            // Update progress
-            progress.currentBatch = startBatch + i + 1;
-            progress.totalBatches = embeddingBatches.length;
-            progress.message = `Completed embedding batch ${startBatch + i + 1} of ${embeddingBatches.length}`;
-          }
-
-          // Build Pinecone vectors
-          console.log('[PROCESS] Building Pinecone vectors');
+          // Build Pinecone vectors array
           const vectors: Array<{
             id: string;
             values: number[];
             metadata: Record<string, any>;
           }> = [];
-          let embeddingIndex = 0;
-          for (let b = startBatch; b < endBatch; b++) {
-            const chunkBatch = embeddingBatches[b];
-            for (let i = 0; i < chunkBatch.length; i++) {
-              const { text, pageStart, pageEnd, hash } = chunkBatch[i];
-              const embedding = allEmbeddings[embeddingIndex++];
-              const contactInfo = detectContactInfo(text);
 
-              // Only create vector if the chunk has meaningful content
-              // and is not just a header or page number
-              const cleanText = text.replace(/Page\s*\d+\n/g, '').trim();
-              if (cleanText.length < 10) {
-                console.log(`[PROCESS] Skipping chunk with insufficient content in pages ${pageStart}-${pageEnd}`);
-                continue;
+          // =====================================================================
+          // FAQ PATH: Embed questions for better semantic search
+          // =====================================================================
+          if (usingFAQChunks) {
+            console.log('[PROCESS] Using FAQ embedding strategy (embedding questions)');
+
+            // Group FAQ chunks into batches
+            const faqBatches: FAQChunk[][] = [];
+            for (let i = 0; i < faqChunks.length; i += EMBEDDING_BATCH_SIZE) {
+              faqBatches.push(faqChunks.slice(i, i + EMBEDDING_BATCH_SIZE));
+            }
+
+            console.log(`[PROCESS] Created ${faqBatches.length} FAQ embedding batches of size ${EMBEDDING_BATCH_SIZE}`);
+
+            const BATCHES_PER_CALL = 10;
+            const endBatch = Math.min(startBatch + BATCHES_PER_CALL, faqBatches.length);
+            const currentBatches = faqBatches.slice(startBatch, endBatch);
+
+            console.log(`[PROCESS] Processing FAQ embedding batches ${startBatch + 1} to ${endBatch} of ${faqBatches.length}`);
+
+            // Update progress for embedding
+            progress.phase = 'embedding';
+            progress.message = `Processing FAQ embedding batch ${startBatch + 1} of ${faqBatches.length}`;
+
+            // Generate embeddings for QUESTIONS (better for semantic search)
+            const allEmbeddings: any[] = [];
+            for (let i = 0; i < currentBatches.length; i++) {
+              const questions = currentBatches[i].map(c => c.question);
+              console.log(`[PROCESS] Generating embeddings for FAQ batch ${startBatch + i + 1} (${questions.length} questions)`);
+              const batchEmbeddings = await retryWithBackoff(async () => {
+                const resp = await openai.embeddings.create({
+                  model: 'text-embedding-ada-002',
+                  input: questions
+                });
+                return resp.data.map((d: any) => d.embedding);
+              });
+              allEmbeddings.push(...batchEmbeddings);
+              console.log(`[PROCESS] Successfully generated embeddings for FAQ batch ${startBatch + i + 1}`);
+
+              // Update progress
+              progress.currentBatch = startBatch + i + 1;
+              progress.totalBatches = faqBatches.length;
+              progress.message = `Completed FAQ embedding batch ${startBatch + i + 1} of ${faqBatches.length}`;
+            }
+
+            // Build Pinecone vectors with enhanced FAQ metadata
+            console.log('[PROCESS] Building FAQ Pinecone vectors');
+            let embeddingIndex = 0;
+            for (let b = startBatch; b < endBatch; b++) {
+              const chunkBatch = faqBatches[b];
+              for (let i = 0; i < chunkBatch.length; i++) {
+                const chunk = chunkBatch[i];
+                const embedding = allEmbeddings[embeddingIndex++];
+
+                // Create unique ID based on question content
+                const vectorId = crypto.createHash('sha256')
+                  .update(`${fileName}${chunk.question}${chunk.chunkIndex}`)
+                  .digest('hex')
+                  .slice(0, 32);
+
+                vectors.push({
+                  id: vectorId,
+                  values: embedding,
+                  metadata: buildEnhancedFAQMetadata(chunk, fileName!, fileKey!),
+                });
+              }
+            }
+
+            console.log(`[PROCESS] Built ${vectors.length} FAQ vectors for Pinecone`);
+
+            // Check if more batches remain
+            if (endBatch < faqBatches.length) {
+              console.log(`[PROCESS] Completed FAQ batches ${startBatch + 1}-${endBatch}, ${faqBatches.length - endBatch} batches remaining`);
+
+              // Upsert current vectors before returning
+              const vectorBatches: Array<typeof vectors> = [];
+              for (let i = 0; i < vectors.length; i += VECTOR_BATCH_SIZE) {
+                vectorBatches.push(vectors.slice(i, i + VECTOR_BATCH_SIZE));
+              }
+              const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(namespace);
+              for (let i = 0; i < vectorBatches.length; i++) {
+                await retryWithBackoff(async () => {
+                  await index.upsert(vectorBatches[i] as any);
+                });
               }
 
-              // Create a more specific ID that includes the source document
-              const vectorId = crypto.createHash('sha256')
-                .update(`${fileName}${hash}`)
-                .digest('hex')
-                .slice(0, 32);
-
-              vectors.push({
-                id: vectorId,
-                values: embedding,
-                metadata: {
-                  source: fileName!,
-                  text: cleanText.slice(0, 2000), // Store cleaned text
-                  r2Url: fileKey!,
-                  ...contactInfo,
-                  pageStart,
-                  pageEnd,
-                  chunkIndex: b * EMBEDDING_BATCH_SIZE + i,
-                  totalChunks: allChunks.length,
-                  // Add confidence score based on content relevance
-                  confidence: calculateConfidence(cleanText, contactInfo)
-                }
+              return res.status(200).json({
+                success: true,
+                ...progress,
+                nextPhase: 'embeddings',
+                nextBatch: endBatch,
+                totalBatches: faqBatches.length,
+                batchSize: EMBEDDING_BATCH_SIZE,
+                documentType: 'faq'
               });
             }
           }
-          console.log(`[PROCESS] Built ${vectors.length} vectors for Pinecone`);
+          // =====================================================================
+          // STANDARD PATH: Original embedding logic
+          // =====================================================================
+          else {
+            // Group chunks into smaller embedding batches
+            const embeddingBatches: Array<
+              Array<{ text: string; pageStart: number; pageEnd: number; hash: string }>
+            > = [];
+            for (let i = 0; i < allChunks.length; i += EMBEDDING_BATCH_SIZE) {
+              embeddingBatches.push(allChunks.slice(i, i + EMBEDDING_BATCH_SIZE));
+            }
 
-          // Break vectors into Pinecone-friendly batches
-          const vectorBatches: Array<typeof vectors> = [];
-          for (let i = 0; i < vectors.length; i += VECTOR_BATCH_SIZE) {
-            vectorBatches.push(vectors.slice(i, i + VECTOR_BATCH_SIZE));
+            console.log(`[PROCESS] Created ${embeddingBatches.length} embedding batches of size ${EMBEDDING_BATCH_SIZE}`);
+
+            // Process fewer batches per request
+            const BATCHES_PER_CALL = 10;
+            const endBatch = Math.min(startBatch + BATCHES_PER_CALL, embeddingBatches.length);
+            const currentBatches = embeddingBatches.slice(startBatch, endBatch);
+
+            console.log(`[PROCESS] Processing embedding batches ${startBatch + 1} to ${endBatch} of ${embeddingBatches.length}`);
+
+            // Update progress for embedding
+            progress.phase = 'embedding';
+            progress.message = `Processing embedding batch ${startBatch + 1} of ${embeddingBatches.length}`;
+
+            // Generate embeddings
+            const allEmbeddings: any[] = [];
+            for (let i = 0; i < currentBatches.length; i++) {
+              const texts = currentBatches[i].map(c => c.text);
+              console.log(`[PROCESS] Generating embeddings for batch ${startBatch + i + 1} (${texts.length} chunks)`);
+              const batchEmbeddings = await retryWithBackoff(async () => {
+                const resp = await openai.embeddings.create({
+                  model: 'text-embedding-ada-002',
+                  input: texts
+                });
+                return resp.data.map((d: any) => d.embedding);
+              });
+              allEmbeddings.push(...batchEmbeddings);
+              console.log(`[PROCESS] Successfully generated embeddings for batch ${startBatch + i + 1}`);
+
+              // Update progress
+              progress.currentBatch = startBatch + i + 1;
+              progress.totalBatches = embeddingBatches.length;
+              progress.message = `Completed embedding batch ${startBatch + i + 1} of ${embeddingBatches.length}`;
+            }
+
+            // Build Pinecone vectors
+            console.log('[PROCESS] Building Pinecone vectors');
+            let embeddingIndex = 0;
+            for (let b = startBatch; b < endBatch; b++) {
+              const chunkBatch = embeddingBatches[b];
+              for (let i = 0; i < chunkBatch.length; i++) {
+                const { text, pageStart, pageEnd, hash } = chunkBatch[i];
+                const embedding = allEmbeddings[embeddingIndex++];
+                const contactInfo = detectContactInfo(text);
+
+                // Only create vector if the chunk has meaningful content
+                // and is not just a header or page number
+                const cleanText = text.replace(/Page\s*\d+\n/g, '').trim();
+                if (cleanText.length < 10) {
+                  console.log(`[PROCESS] Skipping chunk with insufficient content in pages ${pageStart}-${pageEnd}`);
+                  continue;
+                }
+
+                // Create a more specific ID that includes the source document
+                const vectorId = crypto.createHash('sha256')
+                  .update(`${fileName}${hash}`)
+                  .digest('hex')
+                  .slice(0, 32);
+
+                vectors.push({
+                  id: vectorId,
+                  values: embedding,
+                  metadata: {
+                    source: fileName!,
+                    text: cleanText.slice(0, 2000), // Store cleaned text
+                    r2Url: fileKey!,
+                    ...contactInfo,
+                    pageStart,
+                    pageEnd,
+                    chunkIndex: b * EMBEDDING_BATCH_SIZE + i,
+                    totalChunks: allChunks.length,
+                    // Add confidence score based on content relevance
+                    confidence: calculateConfidence(cleanText, contactInfo)
+                  }
+                });
+              }
+            }
+
+            console.log(`[PROCESS] Built ${vectors.length} vectors for Pinecone`);
+
+            // Check if more batches remain for standard path
+            if (endBatch < embeddingBatches.length) {
+              console.log(`[PROCESS] Completed batches ${startBatch + 1}-${endBatch}, ${embeddingBatches.length - endBatch} batches remaining`);
+
+              // Upsert current vectors before returning
+              const vectorBatches: Array<typeof vectors> = [];
+              for (let i = 0; i < vectors.length; i += VECTOR_BATCH_SIZE) {
+                vectorBatches.push(vectors.slice(i, i + VECTOR_BATCH_SIZE));
+              }
+              const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(namespace);
+              for (let i = 0; i < vectorBatches.length; i++) {
+                await retryWithBackoff(async () => {
+                  await index.upsert(vectorBatches[i] as any);
+                });
+              }
+
+              return res.status(200).json({
+                success: true,
+                ...progress,
+                nextPhase: 'embeddings',
+                nextBatch: endBatch,
+                totalBatches: embeddingBatches.length,
+                batchSize: EMBEDDING_BATCH_SIZE
+              });
+            }
           }
 
-          console.log(`[PROCESS] Split vectors into ${vectorBatches.length} Pinecone batches of size ${VECTOR_BATCH_SIZE}`);
+          console.log(`[PROCESS] Built ${vectors.length} vectors for Pinecone (final)`);
 
-          const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(namespace);
-          for (let i = 0; i < vectorBatches.length; i++) {
-            console.log(`[PROCESS] Upserting Pinecone batch ${i + 1}/${vectorBatches.length} (${vectorBatches[i].length} vectors)`);
-            await retryWithBackoff(async () => {
-              await index.upsert(vectorBatches[i] as any);
-            });
-            console.log(`[PROCESS] Successfully upserted Pinecone batch ${i + 1}`);
-          }
+          // Break vectors into Pinecone-friendly batches and upsert
+          if (vectors.length > 0) {
+            const vectorBatches: Array<typeof vectors> = [];
+            for (let i = 0; i < vectors.length; i += VECTOR_BATCH_SIZE) {
+              vectorBatches.push(vectors.slice(i, i + VECTOR_BATCH_SIZE));
+            }
 
-          // If more embedding batches remain, return progress
-          if (endBatch < embeddingBatches.length) {
-            console.log(`[PROCESS] Completed batches ${startBatch + 1}-${endBatch}, ${embeddingBatches.length - endBatch} batches remaining`);
-            return res.status(200).json({
-              success: true,
-              ...progress,
-              nextPhase: 'embeddings',
-              nextBatch: endBatch,
-              totalBatches: embeddingBatches.length,
-              batchSize: EMBEDDING_BATCH_SIZE
-            });
+            console.log(`[PROCESS] Split vectors into ${vectorBatches.length} Pinecone batches of size ${VECTOR_BATCH_SIZE}`);
+
+            const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(namespace);
+            for (let i = 0; i < vectorBatches.length; i++) {
+              console.log(`[PROCESS] Upserting Pinecone batch ${i + 1}/${vectorBatches.length} (${vectorBatches[i].length} vectors)`);
+              await retryWithBackoff(async () => {
+                await index.upsert(vectorBatches[i] as any);
+              });
+              console.log(`[PROCESS] Successfully upserted Pinecone batch ${i + 1}`);
+            }
           }
 
           // All batches done → update manifest
           console.log('[PROCESS] All embedding batches completed successfully');
           console.log('[PROCESS] Updating document manifest...');
+          
+          // Include document type in manifest for FAQ documents
           const newDocument: DocumentManifest = {
             id: fileKey,
             source: fileName,
             r2Url: fileKey,
             createdAt: new Date().toISOString(),
             namespace,
-            hash: documentHash
+            hash: documentHash,
+            ...(usingFAQChunks && { 
+              documentType: 'faq',
+              chunkCount: faqChunks.length 
+            })
           };
 
           try {
@@ -544,12 +1024,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             }
           }
 
-          console.log(`[PROCESS] Document processing completed successfully for ${fileName}`);
+          const chunkCount = usingFAQChunks ? faqChunks.length : allChunks.length;
+          const docType = usingFAQChunks ? 'FAQ' : 'standard';
+          console.log(`[PROCESS] Document processing completed successfully for ${fileName} (${docType}, ${chunkCount} chunks)`);
+          
           return res.status(200).json({
             success: true,
             ...progress,
-            message: `✅ ${fileName} processed successfully!`,
-            completed: true
+            message: `✅ ${fileName} processed successfully! (${chunkCount} ${usingFAQChunks ? 'FAQ entries' : 'chunks'})`,
+            completed: true,
+            documentType: usingFAQChunks ? 'faq' : 'standard',
+            chunkCount
           });
         } else {
           throw new Error('Invalid phase specified');
