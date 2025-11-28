@@ -382,11 +382,10 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                           >
                             <span className="font-semibold text-base leading-tight">{admin.name}</span>
                             <span className="text-xs text-gray-300 sm:ml-2">{admin.email}</span>
-                            <span className="text-xs text-gray-400 sm:ml-auto">ID: {admin.adminId}</span>
                             <button
                               onClick={() => handleDeleteAdmin(admin.id, group.departmentId)}
                               disabled={deletingAdmin === admin.id}
-                              className="ml-4 px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors disabled:opacity-50"
+                              className="sm:ml-auto px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors disabled:opacity-50"
                             >
                               {deletingAdmin === admin.id ? "Deleting..." : "Delete"}
                             </button>
