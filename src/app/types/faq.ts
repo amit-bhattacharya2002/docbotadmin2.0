@@ -7,3 +7,4 @@ export interface GeneratedFaqItem {
 
 export type GeneratedFaqResponse = GeneratedFaqItem[];
 
+

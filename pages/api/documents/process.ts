@@ -228,9 +228,367 @@ function splitText(
 const CONTACT_PATTERNS = {
   email: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
   phone: /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g,
-  // Add more patterns for other contact info
-  website: /(?:https?:\/\/)?(?:www\.)?[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?/g
+  // Capture full URLs including paths and query parameters
+  website: /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g
 };
+
+// ============================================================================
+// SMART CHUNKING FOR NON-FAQ DOCUMENTS
+// Dynamic, semantic-aware chunking that respects document structure
+// ============================================================================
+
+interface SmartChunk {
+  text: string;
+  pageStart: number;
+  pageEnd: number;
+  hash: string;
+  chunkType: 'section' | 'paragraph' | 'list' | 'standard';
+  sectionTitle?: string;
+  links: string[];
+  keywords: string[];
+  hasList: boolean;
+  hasTable: boolean;
+}
+
+/**
+ * Detect document structure type
+ */
+function detectDocumentStructure(text: string): {
+  hasHeaders: boolean;
+  hasSections: boolean;
+  hasLists: boolean;
+  hasTables: boolean;
+  isStructured: boolean;
+} {
+  const headerPatterns = [
+    /^#{1,6}\s+.+$/gm,                    // Markdown headers
+    /^[A-Z][A-Z\s]{5,}$/gm,               // ALL CAPS headers
+    /^\d+\.\s+[A-Z].+$/gm,                // Numbered sections
+    /^[A-Z][a-z]+(?:\s[A-Z][a-z]+)*:$/gm, // Title Case with colon
+  ];
+  
+  const listPatterns = [
+    /^[\s]*[-•*]\s+.+$/gm,                // Bullet lists
+    /^[\s]*\d+[.)]\s+.+$/gm,              // Numbered lists
+    /^[\s]*[a-z][.)]\s+.+$/gm,            // Letter lists
+  ];
+  
+  const tablePatterns = [
+    /\|.+\|.+\|/g,                        // Markdown tables
+    /\t.+\t.+\t/g,                        // Tab-separated tables
+  ];
+  
+  let headerCount = 0;
+  let listCount = 0;
+  let tableCount = 0;
+  
+  for (const pattern of headerPatterns) {
+    const matches = text.match(pattern);
+    if (matches) headerCount += matches.length;
+  }
+  
+  for (const pattern of listPatterns) {
+    const matches = text.match(pattern);
+    if (matches) listCount += matches.length;
+  }
+  
+  for (const pattern of tablePatterns) {
+    const matches = text.match(pattern);
+    if (matches) tableCount += matches.length;
+  }
+  
+  return {
+    hasHeaders: headerCount >= 2,
+    hasSections: headerCount >= 3,
+    hasLists: listCount >= 3,
+    hasTables: tableCount >= 1,
+    isStructured: headerCount >= 2 || listCount >= 5
+  };
+}
+
+/**
+ * Extract section title from text (if any)
+ */
+function extractSectionTitle(text: string): string | undefined {
+  const lines = text.split('\n').slice(0, 3);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Check for header patterns
+    if (/^#{1,6}\s+(.+)$/.test(trimmed)) {
+      return trimmed.replace(/^#{1,6}\s+/, '');
+    }
+    if (/^[A-Z][A-Z\s]{5,}$/.test(trimmed) && trimmed.length < 100) {
+      return trimmed;
+    }
+    if (/^\d+\.\s+[A-Z].+$/.test(trimmed) && trimmed.length < 100) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Smart chunking: Respects semantic boundaries and document structure
+ */
+function smartChunkDocument(
+  text: string,
+  pageStart: number,
+  pageEnd: number,
+  options: {
+    maxChunkSize?: number;
+    minChunkSize?: number;
+    targetChunkSize?: number;
+    overlap?: number;
+  } = {}
+): SmartChunk[] {
+  const {
+    maxChunkSize = 2500,
+    minChunkSize = 200,
+    targetChunkSize = 1500,
+    overlap = 200
+  } = options;
+  
+  const chunks: SmartChunk[] = [];
+  const structure = detectDocumentStructure(text);
+  
+  // Strategy 1: Split by sections if document has clear headers
+  if (structure.hasSections) {
+    const sectionPattern = /(?:^|\n)(#{1,6}\s+.+|[A-Z][A-Z\s]{5,}|\d+\.\s+[A-Z].+)(?:\n|$)/g;
+    const sections: Array<{ title: string; content: string; start: number }> = [];
+    
+    let lastEnd = 0;
+    let match;
+    const matches: Array<{ title: string; index: number }> = [];
+    
+    while ((match = sectionPattern.exec(text)) !== null) {
+      matches.push({ title: match[1].trim(), index: match.index });
+    }
+    
+    for (let i = 0; i < matches.length; i++) {
+      const start = matches[i].index;
+      const end = i < matches.length - 1 ? matches[i + 1].index : text.length;
+      const content = text.slice(start, end).trim();
+      
+      if (content.length > minChunkSize) {
+        sections.push({
+          title: matches[i].title,
+          content,
+          start
+        });
+      }
+    }
+    
+    // Handle content before first section
+    if (matches.length > 0 && matches[0].index > minChunkSize) {
+      const preContent = text.slice(0, matches[0].index).trim();
+      if (preContent.length > minChunkSize) {
+        sections.unshift({ title: '', content: preContent, start: 0 });
+      }
+    }
+    
+    // If no sections found, treat entire text as one section
+    if (sections.length === 0) {
+      sections.push({ title: '', content: text, start: 0 });
+    }
+    
+    // Process each section
+    for (const section of sections) {
+      if (section.content.length <= maxChunkSize) {
+        // Section fits in one chunk
+        const hash = crypto.createHash('sha256').update(section.content).digest('hex').slice(0, 32);
+        chunks.push({
+          text: section.content,
+          pageStart,
+          pageEnd,
+          hash,
+          chunkType: 'section',
+          sectionTitle: section.title || extractSectionTitle(section.content),
+          links: extractLinks(section.content),
+          keywords: extractKeywords(section.content),
+          hasList: /^[\s]*[-•*\d]+[.)]\s+/m.test(section.content),
+          hasTable: /\|.+\|/.test(section.content)
+        });
+      } else {
+        // Section too large - split by paragraphs with smart boundaries
+        const subChunks = splitBySemanticBoundaries(section.content, targetChunkSize, overlap);
+        for (const sub of subChunks) {
+          const hash = crypto.createHash('sha256').update(sub).digest('hex').slice(0, 32);
+          chunks.push({
+            text: sub,
+            pageStart,
+            pageEnd,
+            hash,
+            chunkType: 'paragraph',
+            sectionTitle: section.title || undefined,
+            links: extractLinks(sub),
+            keywords: extractKeywords(sub),
+            hasList: /^[\s]*[-•*\d]+[.)]\s+/m.test(sub),
+            hasTable: /\|.+\|/.test(sub)
+          });
+        }
+      }
+    }
+  }
+  // Strategy 2: Split by paragraphs for less structured documents
+  else {
+    const subChunks = splitBySemanticBoundaries(text, targetChunkSize, overlap);
+    for (const sub of subChunks) {
+      const hash = crypto.createHash('sha256').update(sub).digest('hex').slice(0, 32);
+      chunks.push({
+        text: sub,
+        pageStart,
+        pageEnd,
+        hash,
+        chunkType: 'standard',
+        sectionTitle: extractSectionTitle(sub),
+        links: extractLinks(sub),
+        keywords: extractKeywords(sub),
+        hasList: /^[\s]*[-•*\d]+[.)]\s+/m.test(sub),
+        hasTable: /\|.+\|/.test(sub)
+      });
+    }
+  }
+  
+  return chunks.filter(c => c.text.trim().length >= minChunkSize);
+}
+
+/**
+ * Split text by semantic boundaries (paragraphs, sentences)
+ * Ensures URLs and lists stay with their context
+ */
+function splitBySemanticBoundaries(
+  text: string,
+  targetSize: number,
+  overlap: number
+): string[] {
+  const chunks: string[] = [];
+  
+  // First, split by double newlines (paragraphs)
+  const paragraphs = text.split(/\n{2,}/).filter(p => p.trim().length > 0);
+  
+  let currentChunk = '';
+  let lastParagraph = '';
+  
+  for (const para of paragraphs) {
+    const trimmedPara = para.trim();
+    
+    // Check if adding this paragraph would exceed target
+    if (currentChunk.length + trimmedPara.length + 2 > targetSize && currentChunk.length > 0) {
+      chunks.push(currentChunk.trim());
+      
+      // Smart overlap: carry over last paragraph if it contains a URL or is a list header
+      if (lastParagraph && (
+        lastParagraph.includes('http') ||
+        /^[\s]*[-•*\d]+[.)]\s+/m.test(lastParagraph) ||
+        lastParagraph.endsWith(':')
+      )) {
+        currentChunk = lastParagraph + '\n\n' + trimmedPara;
+      } else {
+        // Standard overlap: take end of last chunk
+        const overlapText = currentChunk.slice(-overlap);
+        const overlapBreak = overlapText.lastIndexOf('. ');
+        if (overlapBreak > 0) {
+          currentChunk = overlapText.slice(overlapBreak + 2).trim() + '\n\n' + trimmedPara;
+        } else {
+          currentChunk = trimmedPara;
+        }
+      }
+    } else {
+      currentChunk += (currentChunk ? '\n\n' : '') + trimmedPara;
+    }
+    
+    lastParagraph = trimmedPara;
+  }
+  
+  // Don't forget the last chunk
+  if (currentChunk.trim().length > 0) {
+    chunks.push(currentChunk.trim());
+  }
+  
+  return chunks;
+}
+
+/**
+ * Build enhanced metadata for smart chunks
+ */
+function buildSmartChunkMetadata(
+  chunk: SmartChunk,
+  fileName: string,
+  fileKey: string,
+  totalChunks: number,
+  chunkIndex: number
+): Record<string, any> {
+  const contactInfo = detectContactInfo(chunk.text);
+  
+  return {
+    source: fileName,
+    r2Url: fileKey,
+    text: chunk.text.slice(0, 2000),
+    
+    // Structure metadata
+    chunkType: chunk.chunkType,
+    sectionTitle: chunk.sectionTitle?.slice(0, 200),
+    hasList: chunk.hasList,
+    hasTable: chunk.hasTable,
+    
+    // Links and contact info
+    links: chunk.links.slice(0, 10),
+    hasLinks: chunk.links.length > 0,
+    ...contactInfo,
+    
+    // Search optimization
+    keywords: chunk.keywords,
+    
+    // Position info
+    pageStart: chunk.pageStart,
+    pageEnd: chunk.pageEnd,
+    chunkIndex,
+    totalChunks,
+    
+    // Confidence scoring
+    confidence: calculateSmartConfidence(chunk, contactInfo),
+    
+    // Document type marker
+    documentType: 'standard'
+  };
+}
+
+/**
+ * Calculate confidence score for smart chunks
+ */
+function calculateSmartConfidence(
+  chunk: SmartChunk,
+  contactInfo: ReturnType<typeof detectContactInfo>
+): number {
+  let score = 0.7; // Base score
+  
+  // Boost for section chunks (more complete context)
+  if (chunk.chunkType === 'section') {
+    score += 0.1;
+  }
+  
+  // Boost for chunks with section titles
+  if (chunk.sectionTitle) {
+    score += 0.05;
+  }
+  
+  // Boost for chunks with links (actionable content)
+  if (chunk.links.length > 0) {
+    score += 0.05;
+  }
+  
+  // Boost for contact info
+  if (contactInfo.isContactInfo) {
+    score += 0.05;
+  }
+  
+  // Boost for good keyword density
+  if (chunk.keywords.length >= 5) {
+    score += 0.05;
+  }
+  
+  return Math.min(1.0, score);
+}
 
 function detectContactInfo(text: string) {
   const emails = text.match(CONTACT_PATTERNS.email) || [];
@@ -426,6 +784,100 @@ function chunkFAQDocument(text: string): FAQChunk[] {
     });
   }
 
+  return chunks;
+}
+
+/**
+ * Individual Q&A chunking: ALWAYS create separate chunks for each Q&A pair
+ * This ensures each chunk has only its own relevant links/context
+ */
+function chunkFAQDocumentIndividual(text: string): FAQChunk[] {
+  const chunks: FAQChunk[] = [];
+  
+  // Debug: Log first 500 chars to see document structure
+  console.log(`[FAQ-DEBUG] Document preview (first 500 chars):\n${text.slice(0, 500)}`);
+  console.log(`[FAQ-DEBUG] Total text length: ${text.length}`);
+  
+  // Try multiple patterns to handle different FAQ formats
+  const patterns = [
+    // Pattern 1: "Question:" on same line, "Answer:" on next line or same line
+    /Question:\s*(.+?)\s*\n\s*Answer:\s*([\s\S]*?)(?=\n\s*Question:|$)/gi,
+    // Pattern 2: "Question:" and "Answer:" with content (more flexible)
+    /Question:\s*([\s\S]*?)\s*Answer:\s*([\s\S]*?)(?=Question:|$)/gi,
+    // Pattern 3: Q: and A: format
+    /Q:\s*(.+?)\s*\n\s*A:\s*([\s\S]*?)(?=\n\s*Q:|$)/gi,
+  ];
+  
+  let bestMatches: Array<{ question: string; answer: string }> = [];
+  
+  for (let i = 0; i < patterns.length; i++) {
+    const pattern = patterns[i];
+    const matches: Array<{ question: string; answer: string }> = [];
+    let match;
+    pattern.lastIndex = 0; // Reset regex state
+    
+    while ((match = pattern.exec(text)) !== null) {
+      const question = match[1].trim();
+      const answer = match[2].trim();
+      if (question.length > 5 && answer.length > 10) {
+        matches.push({ question, answer });
+      }
+    }
+    
+    console.log(`[FAQ-DEBUG] Pattern ${i + 1} found ${matches.length} matches`);
+    
+    if (matches.length > bestMatches.length) {
+      bestMatches = matches;
+    }
+  }
+  
+  // If standard patterns fail, try splitting by "Question:" delimiter
+  if (bestMatches.length <= 1) {
+    console.log(`[FAQ-DEBUG] Standard patterns found ≤1 match, trying delimiter split...`);
+    
+    // Split by "Question:" and process each section
+    const sections = text.split(/\n\s*Question:\s*/i).filter(s => s.trim().length > 0);
+    console.log(`[FAQ-DEBUG] Split by 'Question:' found ${sections.length} sections`);
+    
+    for (const section of sections) {
+      // Each section should have the question text, then "Answer:", then answer text
+      const answerSplit = section.split(/\n\s*Answer:\s*/i);
+      if (answerSplit.length >= 2) {
+        const question = answerSplit[0].trim();
+        const answer = answerSplit.slice(1).join('\nAnswer: ').trim();
+        if (question.length > 5 && answer.length > 10) {
+          bestMatches.push({ question, answer });
+        }
+      }
+    }
+    console.log(`[FAQ-DEBUG] After delimiter split: ${bestMatches.length} Q&A pairs`);
+  }
+  
+  // Build chunks from matches
+  let globalChunkIndex = 0;
+  for (const { question, answer } of bestMatches) {
+    const fullText = `Question: ${question}\n\nAnswer: ${answer}`;
+
+    chunks.push({
+      text: fullText,
+      question,
+      answer,
+      links: extractLinks(answer),
+      detailsLinks: extractDetailsLinks(answer),
+      chunkIndex: globalChunkIndex++,
+      chunkType: 'complete_faq',
+      isComplete: true,
+      keywords: extractKeywords(question),
+    });
+  }
+
+  console.log(`[FAQ-INDIVIDUAL] Extracted ${chunks.length} individual Q&A pairs`);
+  if (chunks.length > 0 && chunks.length <= 3) {
+    // Log first few for debugging
+    chunks.forEach((c, i) => {
+      console.log(`[FAQ-DEBUG] Chunk ${i + 1}: Q="${c.question.slice(0, 50)}..." Links=${c.links.length}`);
+    });
+  }
   return chunks;
 }
 
@@ -670,81 +1122,69 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         console.log('[PROCESS] Starting chunking phase');
 
         // =====================================================================
-        // FAQ-OPTIMIZED PATH: Chunk by Q&A pairs
+        // FAQ-OPTIMIZED PATH: Chunk by Q&A pairs (ONE CHUNK PER Q&A)
         // =====================================================================
         let faqChunks: FAQChunk[] = [];
         if (isDocumentFAQ) {
-          console.log('[PROCESS] Using FAQ-optimized chunking strategy');
+          console.log('[PROCESS] Using FAQ-optimized chunking strategy (individual Q&A pairs)');
           
-          // First try standard FAQ chunking
-          faqChunks = chunkFAQDocument(fullDocumentText);
+          // Use the individual chunking approach - one chunk per Q&A
+          faqChunks = chunkFAQDocumentIndividual(fullDocumentText);
           
-          // If chunks are too large, use hybrid approach
-          const avgChunkSize = faqChunks.length > 0 
-            ? faqChunks.reduce((acc, c) => acc + c.text.length, 0) / faqChunks.length 
-            : 0;
-          
-          if (avgChunkSize > 2500 || faqChunks.length === 0) {
-            console.log('[PROCESS] FAQ chunks too large or none found, using hybrid approach');
-            faqChunks = chunkFAQDocumentHybrid(fullDocumentText, 2000);
-          }
-          
-          console.log(`[PROCESS] Created ${faqChunks.length} FAQ chunks`);
+          console.log(`[PROCESS] Created ${faqChunks.length} individual FAQ chunks`);
           if (faqChunks.length > 0) {
             console.log(`[PROCESS] Sample FAQ question: "${faqChunks[0].question.slice(0, 80)}..."`);
+            console.log(`[PROCESS] Sample FAQ has ${faqChunks[0].links.length} links`);
           }
         }
 
         // =====================================================================
-        // STANDARD PATH: Fixed-size chunking (original logic)
+        // STANDARD PATH: Smart semantic chunking
         // =====================================================================
-        const allChunks: Array<{
-          text: string;
-          pageStart: number;
-          pageEnd: number;
-          hash: string;
-        }> = [];
+        let smartChunks: SmartChunk[] = [];
 
         if (!isDocumentFAQ || faqChunks.length === 0) {
           // Fall back to standard chunking if not FAQ or FAQ parsing failed
           if (isDocumentFAQ && faqChunks.length === 0) {
-            console.log('[PROCESS] FAQ detection succeeded but no Q&A pairs found, falling back to standard chunking');
+            console.log('[PROCESS] FAQ detection succeeded but no Q&A pairs found, falling back to smart chunking');
           }
 
           const seenChunks = new Set<string>();
+          const docStructure = detectDocumentStructure(fullDocumentText);
+          console.log(`[PROCESS] Document structure: headers=${docStructure.hasHeaders}, sections=${docStructure.hasSections}, lists=${docStructure.hasLists}, tables=${docStructure.hasTables}`);
 
           for (const { text, pageStart, pageEnd } of blockData) {
-            const subChunks = splitText([text], 3000, 150);
-            console.log(`[PROCESS] Block ${pageStart}-${pageEnd}: Split into ${subChunks.length} subchunks`);
+            // Use smart chunking that respects semantic boundaries
+            const subChunks = smartChunkDocument(text, pageStart, pageEnd, {
+              maxChunkSize: 2500,
+              minChunkSize: 200,
+              targetChunkSize: 1500,
+              overlap: 200
+            });
+            console.log(`[PROCESS] Block ${pageStart}-${pageEnd}: Smart chunked into ${subChunks.length} semantic chunks`);
             
-            for (const sub of subChunks) {
-              const chunkHash = crypto.createHash('sha256')
-                .update(sub)
-                .digest('hex')
-                .slice(0, 32);
-
-              if (!seenChunks.has(chunkHash)) {
-                seenChunks.add(chunkHash);
-                allChunks.push({ 
-                  text: sub, 
-                  pageStart, 
-                  pageEnd,
-                  hash: chunkHash 
-                });
+            for (const chunk of subChunks) {
+              if (!seenChunks.has(chunk.hash)) {
+                seenChunks.add(chunk.hash);
+                smartChunks.push(chunk);
               } else {
                 console.log(`[PROCESS] Skipping duplicate chunk in pages ${pageStart}-${pageEnd}`);
               }
             }
           }
 
-          console.log(`[PROCESS] Final unique chunk count: ${allChunks.length}`);
-          console.log(`[PROCESS] Average chunk size: ${Math.round(allChunks.reduce((acc, chunk) => acc + chunk.text.length, 0) / allChunks.length)} characters`);
+          console.log(`[PROCESS] Final unique smart chunk count: ${smartChunks.length}`);
+          if (smartChunks.length > 0) {
+            console.log(`[PROCESS] Average chunk size: ${Math.round(smartChunks.reduce((acc, chunk) => acc + chunk.text.length, 0) / smartChunks.length)} characters`);
+            console.log(`[PROCESS] Chunk types: ${[...new Set(smartChunks.map(c => c.chunkType))].join(', ')}`);
+          }
         }
 
         // Determine which chunks to process
         const usingFAQChunks = isDocumentFAQ && faqChunks.length > 0;
-        const effectiveChunkCount = usingFAQChunks ? faqChunks.length : allChunks.length;
-        console.log(`[PROCESS] Processing ${effectiveChunkCount} chunks using ${usingFAQChunks ? 'FAQ' : 'standard'} strategy`);
+        const usingSmartChunks = !usingFAQChunks && smartChunks.length > 0;
+        const effectiveChunkCount = usingFAQChunks ? faqChunks.length : smartChunks.length;
+        console.log(`[PROCESS] Processing ${effectiveChunkCount} chunks using ${usingFAQChunks ? 'FAQ' : 'smart'} strategy`);
 
         if (phase === 'embeddings') {
           const { startBatch = 0 } = req.body;
@@ -854,35 +1294,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             }
           }
           // =====================================================================
-          // STANDARD PATH: Original embedding logic
+          // STANDARD PATH: Smart semantic embedding logic
           // =====================================================================
           else {
-            // Group chunks into smaller embedding batches
-            const embeddingBatches: Array<
-              Array<{ text: string; pageStart: number; pageEnd: number; hash: string }>
-            > = [];
-            for (let i = 0; i < allChunks.length; i += EMBEDDING_BATCH_SIZE) {
-              embeddingBatches.push(allChunks.slice(i, i + EMBEDDING_BATCH_SIZE));
+            console.log('[PROCESS] Using smart semantic embedding strategy');
+
+            // Group smart chunks into smaller embedding batches
+            const embeddingBatches: SmartChunk[][] = [];
+            for (let i = 0; i < smartChunks.length; i += EMBEDDING_BATCH_SIZE) {
+              embeddingBatches.push(smartChunks.slice(i, i + EMBEDDING_BATCH_SIZE));
             }
 
-            console.log(`[PROCESS] Created ${embeddingBatches.length} embedding batches of size ${EMBEDDING_BATCH_SIZE}`);
+            console.log(`[PROCESS] Created ${embeddingBatches.length} smart embedding batches of size ${EMBEDDING_BATCH_SIZE}`);
 
             // Process fewer batches per request
             const BATCHES_PER_CALL = 10;
             const endBatch = Math.min(startBatch + BATCHES_PER_CALL, embeddingBatches.length);
             const currentBatches = embeddingBatches.slice(startBatch, endBatch);
 
-            console.log(`[PROCESS] Processing embedding batches ${startBatch + 1} to ${endBatch} of ${embeddingBatches.length}`);
+            console.log(`[PROCESS] Processing smart embedding batches ${startBatch + 1} to ${endBatch} of ${embeddingBatches.length}`);
 
             // Update progress for embedding
             progress.phase = 'embedding';
-            progress.message = `Processing embedding batch ${startBatch + 1} of ${embeddingBatches.length}`;
+            progress.message = `Processing smart embedding batch ${startBatch + 1} of ${embeddingBatches.length}`;
 
             // Generate embeddings
             const allEmbeddings: any[] = [];
             for (let i = 0; i < currentBatches.length; i++) {
               const texts = currentBatches[i].map(c => c.text);
-              console.log(`[PROCESS] Generating embeddings for batch ${startBatch + i + 1} (${texts.length} chunks)`);
+              console.log(`[PROCESS] Generating embeddings for smart batch ${startBatch + i + 1} (${texts.length} chunks)`);
               const batchEmbeddings = await retryWithBackoff(async () => {
                 const resp = await openai.embeddings.create({
                   model: 'text-embedding-ada-002',
@@ -891,62 +1331,57 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 return resp.data.map((d: any) => d.embedding);
               });
               allEmbeddings.push(...batchEmbeddings);
-              console.log(`[PROCESS] Successfully generated embeddings for batch ${startBatch + i + 1}`);
+              console.log(`[PROCESS] Successfully generated embeddings for smart batch ${startBatch + i + 1}`);
 
               // Update progress
               progress.currentBatch = startBatch + i + 1;
               progress.totalBatches = embeddingBatches.length;
-              progress.message = `Completed embedding batch ${startBatch + i + 1} of ${embeddingBatches.length}`;
+              progress.message = `Completed smart embedding batch ${startBatch + i + 1} of ${embeddingBatches.length}`;
             }
 
-            // Build Pinecone vectors
-            console.log('[PROCESS] Building Pinecone vectors');
+            // Build Pinecone vectors with enhanced metadata
+            console.log('[PROCESS] Building Pinecone vectors with smart metadata');
             let embeddingIndex = 0;
             for (let b = startBatch; b < endBatch; b++) {
               const chunkBatch = embeddingBatches[b];
               for (let i = 0; i < chunkBatch.length; i++) {
-                const { text, pageStart, pageEnd, hash } = chunkBatch[i];
+                const chunk = chunkBatch[i];
                 const embedding = allEmbeddings[embeddingIndex++];
-                const contactInfo = detectContactInfo(text);
 
                 // Only create vector if the chunk has meaningful content
-                // and is not just a header or page number
-                const cleanText = text.replace(/Page\s*\d+\n/g, '').trim();
+                const cleanText = chunk.text.replace(/Page\s*\d+\n/g, '').trim();
                 if (cleanText.length < 10) {
-                  console.log(`[PROCESS] Skipping chunk with insufficient content in pages ${pageStart}-${pageEnd}`);
+                  console.log(`[PROCESS] Skipping chunk with insufficient content in pages ${chunk.pageStart}-${chunk.pageEnd}`);
                   continue;
                 }
 
                 // Create a more specific ID that includes the source document
                 const vectorId = crypto.createHash('sha256')
-                  .update(`${fileName}${hash}`)
+                  .update(`${fileName}${chunk.hash}`)
                   .digest('hex')
                   .slice(0, 32);
+
+                const globalChunkIndex = b * EMBEDDING_BATCH_SIZE + i;
 
                 vectors.push({
                   id: vectorId,
                   values: embedding,
-                  metadata: {
-                    source: fileName!,
-                    text: cleanText.slice(0, 2000), // Store cleaned text
-                    r2Url: fileKey!,
-                    ...contactInfo,
-                    pageStart,
-                    pageEnd,
-                    chunkIndex: b * EMBEDDING_BATCH_SIZE + i,
-                    totalChunks: allChunks.length,
-                    // Add confidence score based on content relevance
-                    confidence: calculateConfidence(cleanText, contactInfo)
-                  }
+                  metadata: buildSmartChunkMetadata(
+                    chunk,
+                    fileName!,
+                    fileKey!,
+                    smartChunks.length,
+                    globalChunkIndex
+                  )
                 });
               }
             }
 
-            console.log(`[PROCESS] Built ${vectors.length} vectors for Pinecone`);
+            console.log(`[PROCESS] Built ${vectors.length} smart vectors for Pinecone`);
 
-            // Check if more batches remain for standard path
+            // Check if more batches remain for smart path
             if (endBatch < embeddingBatches.length) {
-              console.log(`[PROCESS] Completed batches ${startBatch + 1}-${endBatch}, ${embeddingBatches.length - endBatch} batches remaining`);
+              console.log(`[PROCESS] Completed smart batches ${startBatch + 1}-${endBatch}, ${embeddingBatches.length - endBatch} batches remaining`);
 
               // Upsert current vectors before returning
               const vectorBatches: Array<typeof vectors> = [];
@@ -966,7 +1401,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 nextPhase: 'embeddings',
                 nextBatch: endBatch,
                 totalBatches: embeddingBatches.length,
-                batchSize: EMBEDDING_BATCH_SIZE
+                batchSize: EMBEDDING_BATCH_SIZE,
+                documentType: 'standard'
               });
             }
           }
@@ -1024,8 +1460,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             }
           }
 
-          const chunkCount = usingFAQChunks ? faqChunks.length : allChunks.length;
-          const docType = usingFAQChunks ? 'FAQ' : 'standard';
+          const chunkCount = usingFAQChunks ? faqChunks.length : smartChunks.length;
+          const docType = usingFAQChunks ? 'FAQ' : 'smart';
           console.log(`[PROCESS] Document processing completed successfully for ${fileName} (${docType}, ${chunkCount} chunks)`);
           
           return res.status(200).json({
