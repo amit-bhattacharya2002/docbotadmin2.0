@@ -129,6 +129,8 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
         adminId: "",
         departmentId: initialDepartments.length > 0 ? initialDepartments[0].id : "",
       });
+      // Auto-refresh the admin list after creating a new admin
+      await handleRefreshAdmins();
     } else {
       setAdminStatus(data.message || "Failed to create Department Admin.");
     }
@@ -167,10 +169,8 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
       const data = await res.json();
       if (res.ok) {
         setAdminStatus("Department Admin deleted successfully!");
-        setAdminForm((prev) => ({ ...prev }));
-        setAdminStatus(null);
-        setDeletingAdmin(null);
-        window.location.reload();
+        // Auto-refresh the admin list after deletion
+        await handleRefreshAdmins();
       } else {
         setAdminStatus(data.message || "Failed to delete department admin.");
       }

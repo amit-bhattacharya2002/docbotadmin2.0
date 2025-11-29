@@ -25,6 +25,27 @@ const VECTOR_BATCH_SIZE = 50;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
+// Token limits for embedding model (text-embedding-ada-002 has 8192 token limit)
+// ~4 characters per token, so limit to ~28,000 characters to be safe
+const MAX_EMBEDDING_CHARS = 28000;
+
+/**
+ * Truncate text to fit within embedding model's token limit
+ */
+function truncateForEmbedding(text: string): string {
+  if (text.length <= MAX_EMBEDDING_CHARS) {
+    return text;
+  }
+  console.log(`[TRUNCATE] Text too long (${text.length} chars), truncating to ${MAX_EMBEDDING_CHARS}`);
+  // Try to truncate at a sentence boundary
+  const truncated = text.slice(0, MAX_EMBEDDING_CHARS);
+  const lastPeriod = truncated.lastIndexOf('. ');
+  if (lastPeriod > MAX_EMBEDDING_CHARS * 0.8) {
+    return truncated.slice(0, lastPeriod + 1);
+  }
+  return truncated;
+}
+
 // Increased timeouts
 const API_TIMEOUT = 120000;        // 120 seconds
 const CHUNK_TIMEOUT = 90000;       // 90 seconds
@@ -1223,7 +1244,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             // Generate embeddings for QUESTIONS (better for semantic search)
             const allEmbeddings: any[] = [];
             for (let i = 0; i < currentBatches.length; i++) {
-              const questions = currentBatches[i].map(c => c.question);
+              // Truncate questions to fit token limit
+              const questions = currentBatches[i].map(c => truncateForEmbedding(c.question));
               console.log(`[PROCESS] Generating embeddings for FAQ batch ${startBatch + i + 1} (${questions.length} questions)`);
               const batchEmbeddings = await retryWithBackoff(async () => {
                 const resp = await openai.embeddings.create({
@@ -1321,7 +1343,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             // Generate embeddings
             const allEmbeddings: any[] = [];
             for (let i = 0; i < currentBatches.length; i++) {
-              const texts = currentBatches[i].map(c => c.text);
+              // Truncate texts to fit token limit
+              const texts = currentBatches[i].map(c => truncateForEmbedding(c.text));
               console.log(`[PROCESS] Generating embeddings for smart batch ${startBatch + i + 1} (${texts.length} chunks)`);
               const batchEmbeddings = await retryWithBackoff(async () => {
                 const resp = await openai.embeddings.create({
