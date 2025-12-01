@@ -565,6 +565,7 @@ function chunkByParagraphs(text: string): ParagraphChunk[] {
     .filter(s => s.length > 0);
 
   // Merge small sections (especially URL-only paragraphs) with neighbors
+  // URLs typically come at the END of paragraphs, so prefer merging with PREVIOUS
   const mergedSections: string[] = [];
   const MIN_STANDALONE_LENGTH = 100; // Paragraphs shorter than this get merged
   
@@ -573,15 +574,27 @@ function chunkByParagraphs(text: string): ParagraphChunk[] {
     const isUrlOnly = /^https?:\/\/[^\s]+$/.test(section.trim());
     const isTooShort = section.length < MIN_STANDALONE_LENGTH;
     
-    if ((isUrlOnly || isTooShort) && mergedSections.length > 0) {
-      // Merge with previous section
+    // URL-only sections: ALWAYS prefer previous (URLs are typically at end of content)
+    if (isUrlOnly && mergedSections.length > 0) {
       mergedSections[mergedSections.length - 1] += '\n\n' + section;
-      console.log(`[PARA-MERGE] Merged short/URL section with previous: "${section.slice(0, 50)}..."`);
-    } else if ((isUrlOnly || isTooShort) && i < rawSections.length - 1) {
-      // Merge with next section (prepend to it)
+      console.log(`[PARA-MERGE] Merged URL with previous chunk: "${section.slice(0, 60)}..."`);
+    }
+    // Short sections: prefer previous, fall back to next
+    else if (isTooShort && mergedSections.length > 0) {
+      mergedSections[mergedSections.length - 1] += '\n\n' + section;
+      console.log(`[PARA-MERGE] Merged short section with previous: "${section.slice(0, 50)}..."`);
+    }
+    // Short section at start: merge with next
+    else if (isTooShort && i < rawSections.length - 1) {
       rawSections[i + 1] = section + '\n\n' + rawSections[i + 1];
-      console.log(`[PARA-MERGE] Merged short/URL section with next: "${section.slice(0, 50)}..."`);
-    } else {
+      console.log(`[PARA-MERGE] Merged short section with next: "${section.slice(0, 50)}..."`);
+    }
+    // URL at very start with no previous: merge with next
+    else if (isUrlOnly && i < rawSections.length - 1) {
+      rawSections[i + 1] = section + '\n\n' + rawSections[i + 1];
+      console.log(`[PARA-MERGE] Merged URL with next chunk (no previous): "${section.slice(0, 60)}..."`);
+    }
+    else {
       mergedSections.push(section);
     }
   }
