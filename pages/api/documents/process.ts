@@ -154,10 +154,16 @@ async function parsePDF(buffer: Buffer): Promise<Array<{ text: string; pageStart
 async function parseDocx(buffer: Buffer): Promise<string[]> {
   const result = await mammoth.extractRawText({ buffer });
 
-  // Basic cleanup: normalize whitespace and line breaks
-  const text = result.value.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+  // Preserve paragraph structure:
+  // - Normalize Windows newlines → \n
+  // - Collapse 3+ blank lines to exactly 2 (our "paragraph" delimiter)
+  // - This is crucial for glossary/FAQ docs that use double line gaps
+  const text = result.value
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 
-  // For DOCX, we don't have a page structure—just return as a single block
+  // Return as a single block; chunking strategy will be determined later
   return [text];
 }
 
@@ -417,6 +423,10 @@ function smartChunkDocument(
       if (section.content.length <= maxChunkSize) {
         // Section fits in one chunk
         const hash = crypto.createHash('sha256').update(section.content).digest('hex').slice(0, 32);
+        const links = extractLinks(section.content);
+        // Debug: Log links for section chunk
+        console.log(`[SMART-CHUNK section] Preview: "${section.content.slice(0, 60)}..."`);
+        console.log(`[SMART-CHUNK section] Links (${links.length}): ${links.length > 0 ? links.join(' | ') : 'NONE'}`);
         chunks.push({
           text: section.content,
           pageStart,
@@ -424,7 +434,7 @@ function smartChunkDocument(
           hash,
           chunkType: 'section',
           sectionTitle: section.title || extractSectionTitle(section.content),
-          links: extractLinks(section.content),
+          links,
           keywords: extractKeywords(section.content),
           hasList: /^[\s]*[-•*\d]+[.)]\s+/m.test(section.content),
           hasTable: /\|.+\|/.test(section.content)
@@ -434,6 +444,10 @@ function smartChunkDocument(
         const subChunks = splitBySemanticBoundaries(section.content, targetChunkSize, overlap);
         for (const sub of subChunks) {
           const hash = crypto.createHash('sha256').update(sub).digest('hex').slice(0, 32);
+          const links = extractLinks(sub);
+          // Debug: Log links for paragraph chunk
+          console.log(`[SMART-CHUNK paragraph] Preview: "${sub.slice(0, 60)}..."`);
+          console.log(`[SMART-CHUNK paragraph] Links (${links.length}): ${links.length > 0 ? links.join(' | ') : 'NONE'}`);
           chunks.push({
             text: sub,
             pageStart,
@@ -441,7 +455,7 @@ function smartChunkDocument(
             hash,
             chunkType: 'paragraph',
             sectionTitle: section.title || undefined,
-            links: extractLinks(sub),
+            links,
             keywords: extractKeywords(sub),
             hasList: /^[\s]*[-•*\d]+[.)]\s+/m.test(sub),
             hasTable: /\|.+\|/.test(sub)
@@ -455,6 +469,10 @@ function smartChunkDocument(
     const subChunks = splitBySemanticBoundaries(text, targetChunkSize, overlap);
     for (const sub of subChunks) {
       const hash = crypto.createHash('sha256').update(sub).digest('hex').slice(0, 32);
+      const links = extractLinks(sub);
+      // Debug: Log links for standard chunk
+      console.log(`[SMART-CHUNK standard] Preview: "${sub.slice(0, 60)}..."`);
+      console.log(`[SMART-CHUNK standard] Links (${links.length}): ${links.length > 0 ? links.join(' | ') : 'NONE'}`);
       chunks.push({
         text: sub,
         pageStart,
@@ -462,7 +480,7 @@ function smartChunkDocument(
         hash,
         chunkType: 'standard',
         sectionTitle: extractSectionTitle(sub),
-        links: extractLinks(sub),
+        links,
         keywords: extractKeywords(sub),
         hasList: /^[\s]*[-•*\d]+[.)]\s+/m.test(sub),
         hasTable: /\|.+\|/.test(sub)
@@ -527,6 +545,60 @@ function splitBySemanticBoundaries(
   }
   
   return chunks;
+}
+
+/**
+ * Chunk by paragraphs for glossary-style documents
+ * Splits on double newlines (paragraph delimiter)
+ * Each paragraph becomes its own chunk with its links
+ */
+interface ParagraphChunk {
+  text: string;
+  links: string[];
+}
+
+function chunkByParagraphs(text: string): ParagraphChunk[] {
+  // Split by double newline (paragraph/glossary delimiter)
+  const rawSections = text
+    .split(/\n\s*\n/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+
+  // Merge small sections (especially URL-only paragraphs) with neighbors
+  const mergedSections: string[] = [];
+  const MIN_STANDALONE_LENGTH = 100; // Paragraphs shorter than this get merged
+  
+  for (let i = 0; i < rawSections.length; i++) {
+    const section = rawSections[i];
+    const isUrlOnly = /^https?:\/\/[^\s]+$/.test(section.trim());
+    const isTooShort = section.length < MIN_STANDALONE_LENGTH;
+    
+    if ((isUrlOnly || isTooShort) && mergedSections.length > 0) {
+      // Merge with previous section
+      mergedSections[mergedSections.length - 1] += '\n\n' + section;
+      console.log(`[PARA-MERGE] Merged short/URL section with previous: "${section.slice(0, 50)}..."`);
+    } else if ((isUrlOnly || isTooShort) && i < rawSections.length - 1) {
+      // Merge with next section (prepend to it)
+      rawSections[i + 1] = section + '\n\n' + rawSections[i + 1];
+      console.log(`[PARA-MERGE] Merged short/URL section with next: "${section.slice(0, 50)}..."`);
+    } else {
+      mergedSections.push(section);
+    }
+  }
+
+  // Filter out any remaining tiny chunks
+  const finalSections = mergedSections.filter(s => s.length > 50);
+
+  return finalSections.map((section, idx) => {
+    const links = extractLinks(section);
+    // Debug: Log links per paragraph
+    console.log(`[PARA-CHUNK ${idx}] Text preview: "${section.slice(0, 60)}..."`);
+    console.log(`[PARA-CHUNK ${idx}] Links found (${links.length}): ${links.length > 0 ? links.join(' | ') : 'NONE'}`);
+    return {
+      text: section,
+      links,
+    };
+  });
 }
 
 /**
@@ -692,6 +764,25 @@ function isFAQDocument(text: string): boolean {
 
   // Consider it FAQ if we find at least 3 Q&A-like patterns
   return matchCount >= 3;
+}
+
+/**
+ * Detect if a document is glossary-style
+ * Glossary = many short paragraphs separated by double newlines
+ * without Q&A structure
+ */
+function isGlossaryDocument(text: string): boolean {
+  const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 30);
+  
+  if (paragraphs.length < 5) {
+    return false; // Too few paragraphs to be a glossary
+  }
+  
+  const avgLength = paragraphs.reduce((a, p) => a + p.length, 0) / paragraphs.length;
+  
+  // Short paragraphs (avg < 500 chars) with many entries = glossary-like
+  // But not if it's FAQ (check separately)
+  return avgLength < 500;
 }
 
 /**
@@ -878,13 +969,21 @@ function chunkFAQDocumentIndividual(text: string): FAQChunk[] {
   let globalChunkIndex = 0;
   for (const { question, answer } of bestMatches) {
     const fullText = `Question: ${question}\n\nAnswer: ${answer}`;
+    const links = extractLinks(answer);
+    const detailsLinks = extractDetailsLinks(answer);
+    
+    // Debug: Log what's being extracted for each Q&A pair
+    console.log(`[FAQ-CHUNK ${globalChunkIndex}] Question: "${question.slice(0, 60)}..."`);
+    console.log(`[FAQ-CHUNK ${globalChunkIndex}] Answer preview: "${answer.slice(0, 100)}..."`);
+    console.log(`[FAQ-CHUNK ${globalChunkIndex}] Answer length: ${answer.length} chars`);
+    console.log(`[FAQ-CHUNK ${globalChunkIndex}] Links found (${links.length}): ${links.length > 0 ? links.join(' | ') : 'NONE'}`);
 
     chunks.push({
       text: fullText,
       question,
       answer,
-      links: extractLinks(answer),
-      detailsLinks: extractDetailsLinks(answer),
+      links,
+      detailsLinks,
       chunkIndex: globalChunkIndex++,
       chunkType: 'complete_faq',
       isComplete: true,
@@ -1133,42 +1232,79 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         // Combine all text to detect document type
         const fullDocumentText = blockData.map(b => b.text).join('\n\n');
+        
+        // Detect document type: FAQ > Glossary > Standard
         const isDocumentFAQ = isFAQDocument(fullDocumentText);
-        console.log(`[PROCESS] Document type: ${isDocumentFAQ ? 'FAQ' : 'Standard'}`);
+        const isDocumentGlossary = !isDocumentFAQ && isGlossaryDocument(fullDocumentText);
+        
+        const docTypeLabel = isDocumentFAQ ? 'FAQ' : (isDocumentGlossary ? 'Glossary' : 'Standard');
+        console.log(`[PROCESS] Document type detected: ${docTypeLabel}`);
 
         // Update progress for chunking
         progress.phase = 'chunking';
-        progress.message = isDocumentFAQ ? 'Chunking FAQ document by Q&A pairs...' : 'Splitting into chunks...';
+        progress.message = `Chunking ${docTypeLabel} document...`;
 
         console.log('[PROCESS] Starting chunking phase');
 
         // =====================================================================
-        // FAQ-OPTIMIZED PATH: Chunk by Q&A pairs (ONE CHUNK PER Q&A)
+        // STRATEGY 1: FAQ Documents - 1 chunk per Q&A pair
         // =====================================================================
         let faqChunks: FAQChunk[] = [];
+        let smartChunks: SmartChunk[] = [];
+
         if (isDocumentFAQ) {
-          console.log('[PROCESS] Using FAQ-optimized chunking strategy (individual Q&A pairs)');
+          console.log('[PROCESS] Using FAQ chunking strategy (1 chunk per Q&A pair)');
           
-          // Use the individual chunking approach - one chunk per Q&A
           faqChunks = chunkFAQDocumentIndividual(fullDocumentText);
           
-          console.log(`[PROCESS] Created ${faqChunks.length} individual FAQ chunks`);
+          console.log(`[PROCESS] Created ${faqChunks.length} FAQ chunks`);
           if (faqChunks.length > 0) {
             console.log(`[PROCESS] Sample FAQ question: "${faqChunks[0].question.slice(0, 80)}..."`);
             console.log(`[PROCESS] Sample FAQ has ${faqChunks[0].links.length} links`);
           }
+          
+          // If FAQ detection succeeded but no Q&A pairs found, fall through to other strategies
+          if (faqChunks.length === 0) {
+            console.log('[PROCESS] FAQ detection true but no Q&A pairs found; trying other strategies');
+          }
         }
 
         // =====================================================================
-        // STANDARD PATH: Smart semantic chunking
+        // STRATEGY 2: Glossary Documents - 1 chunk per paragraph
         // =====================================================================
-        let smartChunks: SmartChunk[] = [];
-
-        if (!isDocumentFAQ || faqChunks.length === 0) {
-          // Fall back to standard chunking if not FAQ or FAQ parsing failed
-          if (isDocumentFAQ && faqChunks.length === 0) {
-            console.log('[PROCESS] FAQ detection succeeded but no Q&A pairs found, falling back to smart chunking');
+        if (faqChunks.length === 0 && isDocumentGlossary) {
+          console.log('[PROCESS] Using Glossary chunking strategy (1 chunk per paragraph)');
+          
+          const paraChunks = chunkByParagraphs(fullDocumentText);
+          const totalPages = blockData[blockData.length - 1]?.pageEnd || 1;
+          
+          smartChunks = paraChunks.map((c, idx) => {
+            const hash = crypto.createHash('sha256').update(c.text).digest('hex').slice(0, 32);
+            return {
+              text: c.text,
+              pageStart: 1,
+              pageEnd: totalPages,
+              hash,
+              chunkType: 'paragraph' as const,
+              sectionTitle: extractSectionTitle(c.text),
+              links: c.links,
+              keywords: extractKeywords(c.text),
+              hasList: /^[\s]*[-•*\d]+[.)]\s+/m.test(c.text),
+              hasTable: /\|.+\|/.test(c.text),
+            };
+          });
+          
+          console.log(`[PROCESS] Created ${smartChunks.length} glossary/paragraph chunks`);
+          if (smartChunks.length > 0) {
+            console.log(`[PROCESS] Average chunk size: ${Math.round(smartChunks.reduce((acc, c) => acc + c.text.length, 0) / smartChunks.length)} chars`);
           }
+        }
+
+        // =====================================================================
+        // STRATEGY 3: Standard Documents - smartChunkDocument (~1500 chars)
+        // =====================================================================
+        if (faqChunks.length === 0 && smartChunks.length === 0) {
+          console.log('[PROCESS] Using Standard chunking strategy (smartChunkDocument ~1500 chars)');
 
           const seenChunks = new Set<string>();
           const docStructure = detectDocumentStructure(fullDocumentText);
@@ -1201,11 +1337,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
         }
 
-        // Determine which chunks to process
-        const usingFAQChunks = isDocumentFAQ && faqChunks.length > 0;
+        // Determine which chunks to process and document type
+        const usingFAQChunks = faqChunks.length > 0;
         const usingSmartChunks = !usingFAQChunks && smartChunks.length > 0;
         const effectiveChunkCount = usingFAQChunks ? faqChunks.length : smartChunks.length;
-        console.log(`[PROCESS] Processing ${effectiveChunkCount} chunks using ${usingFAQChunks ? 'FAQ' : 'smart'} strategy`);
+        const finalDocType = usingFAQChunks ? 'FAQ' : (isDocumentGlossary ? 'Glossary' : 'Standard');
+        console.log(`[PROCESS] Processing ${effectiveChunkCount} chunks using ${finalDocType} strategy`);
 
         if (phase === 'embeddings') {
           const { startBatch = 0 } = req.body;
@@ -1455,7 +1592,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           console.log('[PROCESS] All embedding batches completed successfully');
           console.log('[PROCESS] Updating document manifest...');
           
-          // Include document type in manifest for FAQ documents
+          // Include document type and chunk count in manifest
           const newDocument: DocumentManifest = {
             id: fileKey,
             source: fileName,
@@ -1463,10 +1600,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             createdAt: new Date().toISOString(),
             namespace,
             hash: documentHash,
-            ...(usingFAQChunks && { 
-              documentType: 'faq',
-              chunkCount: faqChunks.length 
-            })
+            documentType: finalDocType.toLowerCase() as 'faq' | 'glossary' | 'standard',
+            chunkCount: effectiveChunkCount
           };
 
           try {
@@ -1484,15 +1619,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
 
           const chunkCount = usingFAQChunks ? faqChunks.length : smartChunks.length;
-          const docType = usingFAQChunks ? 'FAQ' : 'smart';
-          console.log(`[PROCESS] Document processing completed successfully for ${fileName} (${docType}, ${chunkCount} chunks)`);
+          console.log(`[PROCESS] Document processing completed successfully for ${fileName} (${finalDocType}, ${chunkCount} chunks)`);
           
           return res.status(200).json({
             success: true,
             ...progress,
-            message: `✅ ${fileName} processed successfully! (${chunkCount} ${usingFAQChunks ? 'FAQ entries' : 'chunks'})`,
+            message: `✅ ${fileName} processed successfully! (${chunkCount} ${finalDocType} chunks)`,
             completed: true,
-            documentType: usingFAQChunks ? 'faq' : 'standard',
+            documentType: finalDocType.toLowerCase(),
             chunkCount
           });
         } else {

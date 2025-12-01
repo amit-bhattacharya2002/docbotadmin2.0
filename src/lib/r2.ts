@@ -42,8 +42,8 @@ export interface DocumentManifest {
   createdAt: string;
   namespace: string;
   hash?: string;
-  // FAQ document support
-  documentType?: 'faq' | 'standard';
+  // Document type support
+  documentType?: 'faq' | 'glossary' | 'standard';
   chunkCount?: number;
 }
 
