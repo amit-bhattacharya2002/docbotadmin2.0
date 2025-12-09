@@ -103,7 +103,7 @@ export default function AdminDashboardClient({
                     />
                     <button
                       onClick={() => {
-                        navigator.clipboard.writeText(`https://docbot.meaningfulinnovations.org/company/${companyId}/department/${departmentId}`);
+                        navigator.clipboard.writeText(`https://docbotv2.vercel.app/company/${companyId}/department/${departmentId}`);
                         alert('Link copied to clipboard!');
                       }}
                       className="px-4 py-2.5 bg-blue-600 text-white hover:bg-blue-700 text-xs tracking-tight rounded-lg transition-all duration-200 whitespace-nowrap"
