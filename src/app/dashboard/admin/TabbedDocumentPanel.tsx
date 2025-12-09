@@ -16,8 +16,6 @@ export default function TabbedDocumentPanel({
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"upload" | "manage">("upload");
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
-  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState<string>("");
   const fetchControllerRef = useRef<AbortController | null>(null);
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastFetchRef = useRef<number>(0);
@@ -167,42 +165,6 @@ export default function TabbedDocumentPanel({
     }
   };
 
-  const handleStartRename = (folder: any) => {
-    setRenamingFolderId(folder.id);
-    setRenameValue(folder.name);
-  };
-
-  const handleCancelRename = () => {
-    setRenamingFolderId(null);
-    setRenameValue("");
-  };
-
-  const handleSaveRename = async (folderId: string) => {
-    if (!renameValue.trim()) {
-      alert("Folder name cannot be empty");
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/subfolders/${folderId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: renameValue.trim() }),
-      });
-
-      if (res.ok) {
-        handleSubfolderChange();
-        setRenamingFolderId(null);
-        setRenameValue("");
-      } else {
-        const data = await res.json();
-        alert(data.message || "Failed to rename folder");
-      }
-    } catch (error) {
-      console.error("Error renaming folder:", error);
-      alert("Failed to rename folder");
-    }
-  };
 
   return (
     <div className="w-full h-full bg-[#111111] rounded-xl border border-white/5 flex flex-col flex-1 min-h-0">
@@ -254,80 +216,31 @@ export default function TabbedDocumentPanel({
                     : "text-gray-400 hover:text-blue-400 hover:bg-blue-500/10"
                 }`}
               >
-                {renamingFolderId === subfolder.id ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          handleSaveRename(subfolder.id);
-                        } else if (e.key === "Escape") {
-                          handleCancelRename();
-                        }
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleFolderSelect(subfolder.id)}
+                    className="flex-1 flex items-center gap-2.5 text-left"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <span className="text-sm tracking-tight">{subfolder.name}</span>
+                  </button>
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteFolder(subfolder.id, subfolder.name);
                       }}
-                      className="flex-1 px-2.5 py-1.5 rounded-lg bg-blue-500/10 text-blue-300 text-sm tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500/20 border border-white/10"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => handleSaveRename(subfolder.id)}
-                      className="p-1.5 text-green-400 hover:text-green-300 hover:bg-white/5 rounded transition-colors"
-                      title="Save"
+                      className="p-1.5 hover:bg-red-500/10 rounded transition-colors text-red-400"
+                      title="Delete folder"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </button>
-                    <button
-                      onClick={handleCancelRename}
-                      className="p-1.5 text-red-400 hover:text-red-300 hover:bg-white/5 rounded transition-colors"
-                      title="Cancel"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                       </svg>
                     </button>
                   </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleFolderSelect(subfolder.id)}
-                      className="flex-1 flex items-center gap-2.5 text-left"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                      </svg>
-                      <span className="text-sm tracking-tight">{subfolder.name}</span>
-                    </button>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleStartRename(subfolder);
-                        }}
-                        className="p-1.5 hover:bg-blue-500/10 rounded transition-colors"
-                        title="Rename folder"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteFolder(subfolder.id, subfolder.name);
-                        }}
-                        className="p-1.5 hover:bg-red-500/10 rounded transition-colors text-red-400"
-                        title="Delete folder"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                )}
+                </div>
               </div>
             ))}
             
@@ -402,14 +315,14 @@ export default function TabbedDocumentPanel({
                       <div className="text-red-400 text-xs mb-4 tracking-tight">{error}</div>
           )}
           <ManageDocumentPanel 
-            namespace={namespace} 
+                      namespace={selectedFolder ? selectedFolder.pineconeNamespace : namespace} 
             documents={documents} 
             loading={loading} 
             onDelete={async (id) => {
               setDocuments(docs => docs.filter(doc => doc.id !== id));
-              await fetchDocuments(true);
-            }} 
-          />
+                        await fetchDocuments(true, selectedFolderId);
+                      }} 
+                    />
                   </div>
                 )}
               </div>

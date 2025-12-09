@@ -92,26 +92,26 @@ export default function AdminDashboardClient({
             <div className="flex-1 flex flex-col min-h-0">
               {/* Docbot Client Link - Always Visible */}
               {companyId && departmentId && (
-                <div className="mb-6 bg-blue-500/10 border border-white/10 rounded-lg p-4 flex-shrink-0">
-                  <h2 className="text-sm tracking-tight mb-3"><span className="text-blue-400">Docbot</span> <span className="text-white">Client Link</span></h2>
-                  <div className="flex items-center gap-2">
+                <div className="mb-6 bg-[#111111] border border-white/10 rounded-xl p-6 flex-shrink-0">
+                  <h2 className="text-sm tracking-tight mb-4">Chatbot link</h2>
+                  <div className="flex items-center gap-2 mb-3">
                     <input
                       type="text"
                       readOnly
                       value={`https://docbot.meaningfulinnovations.org/company/${companyId}/department/${departmentId}`}
-                      className="flex-1 bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs tracking-tight px-3 py-2 rounded-lg focus:outline-none"
+                      className="flex-1 bg-blue-500/10 border border-white/10 text-blue-300 text-xs tracking-tight px-4 py-2.5 rounded-lg focus:outline-none"
                     />
                     <button
                       onClick={() => {
                         navigator.clipboard.writeText(`https://docbot.meaningfulinnovations.org/company/${companyId}/department/${departmentId}`);
                         alert('Link copied to clipboard!');
                       }}
-                      className="px-3 py-2 bg-blue-600 text-white hover:bg-blue-700 text-xs tracking-tight rounded-lg transition-all duration-200 whitespace-nowrap"
+                      className="px-4 py-2.5 bg-blue-600 text-white hover:bg-blue-700 text-xs tracking-tight rounded-lg transition-all duration-200 whitespace-nowrap"
                     >
                       Copy
                     </button>
                   </div>
-                  <div className="mt-2 text-xs text-gray-500 tracking-tight">Share this link with users to access the Docbot client.</div>
+                  <div className="text-xs text-gray-500 tracking-tight">Share this link with users to access the Docbot client.</div>
                 </div>
               )}
 
@@ -128,23 +128,23 @@ export default function AdminDashboardClient({
             <div className="flex-1 flex flex-col min-h-0">
               {/* Docbot Client Link - Not Configured for External */}
               {companyId && departmentId && (
-                <div className="mb-6 bg-blue-500/10 border border-white/10 rounded-lg p-4 flex-shrink-0">
-                  <h2 className="text-sm tracking-tight mb-3"><span className="text-blue-400">Docbot</span> <span className="text-white">Client Link</span></h2>
-                  <div className="flex items-center gap-2">
+                <div className="mb-6 bg-[#111111] border border-white/10 rounded-xl p-6 flex-shrink-0">
+                  <h2 className="text-sm tracking-tight mb-4">Chatbot link</h2>
+                  <div className="flex items-center gap-2 mb-3">
                     <input
                       type="text"
                       readOnly
                       value="Docbot client not configured"
-                      className="flex-1 bg-blue-500/10 border border-blue-500/20 text-gray-500 text-xs tracking-tight px-3 py-2 rounded-lg focus:outline-none"
+                      className="flex-1 bg-blue-500/10 border border-white/10 text-gray-500 text-xs tracking-tight px-4 py-2.5 rounded-lg focus:outline-none"
                     />
                     <button
                       disabled
-                      className="px-3 py-2 bg-blue-500/10 text-gray-500 text-xs tracking-tight rounded-lg transition-colors whitespace-nowrap cursor-not-allowed"
+                      className="px-4 py-2.5 bg-blue-500/10 text-gray-500 text-xs tracking-tight rounded-lg transition-colors whitespace-nowrap cursor-not-allowed"
                     >
                       Copy
                     </button>
                   </div>
-                  <div className="mt-2 text-xs text-gray-500 tracking-tight">Docbot client is not available for external documents.</div>
+                  <div className="text-xs text-gray-500 tracking-tight">Docbot client is not available for external documents.</div>
                 </div>
               )}
 

@@ -136,8 +136,19 @@ export async function deleteFromManifest(namespace: string, documentId: string):
     // 1. Read existing manifest
     const existingManifest = await getManifestFromR2(namespace);
     
-    // 2. Remove document
-    const updatedManifest = existingManifest.filter(doc => doc.id !== documentId);
+    console.log(`[DELETE MANIFEST] Looking for document with id/r2Url: ${documentId}`);
+    console.log(`[DELETE MANIFEST] Current manifest has ${existingManifest.length} documents`);
+    
+    // 2. Remove document - check both id and r2Url fields since they might differ
+    const updatedManifest = existingManifest.filter(doc => {
+      const matches = doc.id !== documentId && doc.r2Url !== documentId;
+      if (!matches) {
+        console.log(`[DELETE MANIFEST] Found matching document:`, { id: doc.id, r2Url: doc.r2Url, documentId });
+      }
+      return matches;
+    });
+
+    console.log(`[DELETE MANIFEST] After filtering, manifest has ${updatedManifest.length} documents`);
 
     // 3. Write back to R2
     const command = new PutObjectCommand({
@@ -148,6 +159,7 @@ export async function deleteFromManifest(namespace: string, documentId: string):
     });
 
     await r2Client.send(command);
+    console.log(`[DELETE MANIFEST] Manifest updated successfully in R2`);
   } catch (error) {
     console.error('Error deleting from manifest:', error);
     throw error;
