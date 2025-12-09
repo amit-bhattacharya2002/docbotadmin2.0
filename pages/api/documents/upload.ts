@@ -9,14 +9,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  const { filename, contentType, namespace } = req.body;
+  const { filename, contentType, namespace, subfolderId } = req.body;
   if (!filename || !namespace) {
     res.status(400).json({ error: 'Missing filename or namespace' });
     return;
   }
 
   // Generate a unique key for the file
-  const fileKey = `${namespace}/${Date.now()}-${filename}`;
+  // If subfolderId is provided, include it in the file path
+  let fileKey = `${namespace}/${Date.now()}-${filename}`;
+  if (subfolderId) {
+    fileKey = `${namespace}/${subfolderId}/${Date.now()}-${filename}`;
+  }
 
   // Generate a signed URL for PUT (upload)
   const command = new PutObjectCommand({

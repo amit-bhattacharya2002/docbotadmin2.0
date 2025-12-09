@@ -60,14 +60,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     console.log('[PRESIGNED-URL] Starting URL generation');
-    const { namespace, fileName, contentType } = req.body;
+    const { namespace, fileName, contentType, subfolderId } = req.body;
 
     if (!namespace || !fileName || !contentType) {
       console.error('[PRESIGNED-URL] Missing required fields:', { namespace, fileName, contentType });
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const fileKey = `${namespace}/${Date.now()}-${fileName}`;
+    // If subfolderId is provided, include it in the file path
+    let fileKey = `${namespace}/${Date.now()}-${fileName}`;
+    if (subfolderId) {
+      fileKey = `${namespace}/${subfolderId}/${Date.now()}-${fileName}`;
+    }
     console.log('[PRESIGNED-URL] Generated file key:', fileKey);
     
     const command = new PutObjectCommand({

@@ -1,30 +1,30 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0a0a;
+  --foreground: #f5f5f5;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-noto);
-  --font-inter: var(--font-inter);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-montserrat: var(--font-montserrat);
 }
 
 html, body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-noto), sans-serif;
+  font-family: var(--font-montserrat), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-inter), sans-serif;
+  font-family: var(--font-montserrat), sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+* {
+  font-weight: 600;
 }

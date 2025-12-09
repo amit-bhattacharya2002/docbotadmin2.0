@@ -7,6 +7,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const namespace = req.query.namespace as string;
+  const subfolderId = req.query.subfolderId as string | undefined;
+  
   if (!namespace) {
     return res.status(400).json({ error: 'Namespace is required' });
   }
@@ -16,12 +18,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const perPage = parseInt(req.query.perPage as string) || 50;
 
   try {
+    // If subfolderId is provided, get documents from that subfolder's namespace
+    // Otherwise, get documents from the base namespace
+    let targetNamespace = namespace;
+    
+    if (subfolderId) {
+      const { PrismaClient } = await import('@prisma/client');
+      const prisma = new PrismaClient();
+      const subfolder = await prisma.subfolder.findUnique({
+        where: { id: subfolderId },
+      });
+      if (subfolder) {
+        targetNamespace = subfolder.pineconeNamespace;
+      }
+      await prisma.$disconnect();
+    }
+
     // Get manifest from R2
-    let manifest = await getManifestFromR2(namespace);
+    let manifest = await getManifestFromR2(targetNamespace);
     
     // If manifest doesn't exist, create it
     if (manifest.length === 0) {
-      await createInitialManifest(namespace);
+      await createInitialManifest(targetNamespace);
     }
 
     // Calculate pagination

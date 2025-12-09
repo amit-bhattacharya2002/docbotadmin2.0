@@ -14,8 +14,8 @@ module.exports = {
           foreground: 'var(--foreground)',
         },
         fontFamily: {
-          sans: ['var(--font-geist-sans)', 'Arial', 'Helvetica', 'sans-serif'],
-          mono: ['var(--font-geist-mono)'],
+          montserrat: ['var(--font-montserrat)', 'sans-serif'],
+          sans: ['var(--font-montserrat)', 'sans-serif'],
         },
       },
     },

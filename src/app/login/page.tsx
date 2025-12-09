@@ -31,18 +31,18 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-black">
+    <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a]">
       <form
         onSubmit={handleSubmit}
-        className="bg-white/10 backdrop-blur-lg p-8 rounded-2xl shadow-xl w-full max-w-md flex flex-col gap-6 border border-white/20"
+        className="bg-[#111111] border border-white/10 p-8 rounded-xl w-full max-w-md flex flex-col gap-6 shadow-xl"
       >
-        <h2 className="text-3xl h-full font-bold mb-2 text-center bg-gradient-to-r from-blue-400 to-blue-600 bg-clip-text text-transparent">Docbot Login</h2>
+        <h2 className="text-2xl tracking-tight text-center mb-2"><span className="text-blue-400">Docbot</span> <span className="text-white">Login</span></h2>
         <div className="flex flex-col gap-4">
-          <label className="text-gray-300 text-sm" htmlFor="email">
+          <label className="text-gray-400 text-xs tracking-tight" htmlFor="email">
             Email
           </label>
           <input
-            className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-3 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 placeholder:text-gray-500 text-sm tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             name="email"
             type="email"
             placeholder="Email"
@@ -51,11 +51,11 @@ export default function LoginPage() {
             required
             id="email"
           />
-          <label className="text-gray-300 text-sm" htmlFor="password">
+          <label className="text-gray-400 text-xs tracking-tight" htmlFor="password">
             Password
           </label>
           <input
-            className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-3 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 placeholder:text-gray-500 text-sm tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             name="password"
             type="password"
             placeholder="Password"
@@ -67,13 +67,13 @@ export default function LoginPage() {
         </div>
         <button
           type="submit"
-          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors mt-2 disabled:opacity-60"
+          className="bg-blue-600 text-white hover:bg-blue-700 text-sm tracking-tight py-3 rounded-lg transition-all duration-200 mt-2 disabled:opacity-40"
           disabled={loading}
         >
           {loading ? "Logging in..." : "Login"}
         </button>
         {status && (
-          <div className="text-center text-sm mt-2 text-white bg-black/40 rounded-lg py-2 px-4">
+          <div className="text-center text-xs tracking-tight mt-2 text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg py-2 px-4">
             {status}
           </div>
         )}

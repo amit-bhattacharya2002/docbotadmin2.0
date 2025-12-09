@@ -60,38 +60,38 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-700">
+    <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a]">
       <form
         onSubmit={handleSubmit}
-        className="bg-white/10 backdrop-blur-lg p-8 rounded-2xl shadow-xl w-full max-w-md flex flex-col gap-6 border border-white/20"
+        className="bg-[#111111] border border-white/10 p-8 rounded-xl w-full max-w-md flex flex-col gap-6 shadow-xl"
       >
-        <h2 className="text-3xl font-bold text-white mb-2 text-center">Register</h2>
+        <h2 className="text-2xl tracking-tight text-blue-400 mb-2 text-center">Register</h2>
         <div className="flex gap-6 justify-center">
-          <label className="flex items-center gap-2 text-white">
+          <label className="flex items-center gap-2 text-blue-300 text-sm tracking-tight">
             <input
               type="radio"
               name="role"
               value="SUPERADMIN"
               checked={role === "SUPERADMIN"}
               onChange={handleRoleChange}
-              className="accent-blue-600"
+              className="accent-blue-500"
             />
             SuperAdmin
           </label>
-          <label className="flex items-center gap-2 text-white">
+          <label className="flex items-center gap-2 text-blue-300 text-sm tracking-tight">
             <input
               type="radio"
               name="role"
               value="DEPARTMENTADMIN"
               checked={role === "DEPARTMENTADMIN"}
               onChange={handleRoleChange}
-              className="accent-blue-600"
+              className="accent-blue-500"
             />
             Admin
           </label>
         </div>
         <input
-          className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-3 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 placeholder:text-gray-500 text-sm tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           name="name"
           placeholder="Name"
           value={form.name}
@@ -99,7 +99,7 @@ export default function RegisterPage() {
           required
         />
         <input
-          className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-3 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 placeholder:text-gray-500 text-sm tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           name="email"
           type="email"
           placeholder="Email"
@@ -108,7 +108,7 @@ export default function RegisterPage() {
           required
         />
         <input
-          className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-3 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 placeholder:text-gray-500 text-sm tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           name="adminId"
           placeholder="Admin ID"
           value={form.adminId}
@@ -120,10 +120,10 @@ export default function RegisterPage() {
             name="company"
             value={form.company}
             onChange={handleChange}
-            className="px-4 py-3 rounded-lg bg-white/20 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 text-sm tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             required
           >
-            <option value="" disabled>Select Company</option>
+            <option value="" disabled className="text-black">Select Company</option>
             {companies.map((company) => (
               <option key={company} value={company} className="text-black">{company}</option>
             ))}
@@ -134,7 +134,7 @@ export default function RegisterPage() {
             name="department"
             value={form.department}
             onChange={handleChange}
-            className="px-4 py-3 rounded-lg bg-white/20 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 text-sm tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           >
             {DEPARTMENTS.map((dept) => (
               <option key={dept} value={dept} className="text-black">{dept}</option>
@@ -142,7 +142,7 @@ export default function RegisterPage() {
           </select>
         )}
         <input
-          className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-3 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 placeholder:text-gray-500 text-sm tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           name="password"
           type="password"
           placeholder="Password"
@@ -152,13 +152,13 @@ export default function RegisterPage() {
         />
         <button
           type="submit"
-          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors mt-2 disabled:opacity-60"
+          className="bg-blue-600 text-white hover:bg-blue-700 text-sm tracking-tight py-3 rounded-lg transition-all duration-200 mt-2 disabled:opacity-40"
           disabled={loading}
         >
           {loading ? "Registering..." : "Register"}
         </button>
         {status && (
-          <div className="text-center text-sm mt-2 text-white bg-black/40 rounded-lg py-2 px-4">
+          <div className="text-center text-xs tracking-tight mt-2 text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg py-2 px-4">
             {status}
           </div>
         )}

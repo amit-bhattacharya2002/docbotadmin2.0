@@ -12,6 +12,9 @@ import {
   uploadToR2
 } from '@/lib/r2';
 import crypto from 'crypto';
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
 
 const pinecone = new Pinecone({
   apiKey: process.env.PINECONE_API_KEY!
@@ -25,7 +28,7 @@ const VECTOR_BATCH_SIZE = 50;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
-// Token limits for embedding model (text-embedding-ada-002 has 8192 token limit)
+// Token limits for embedding model (text-embedding-3-small has 8192 token limit)
 // ~4 characters per token, so limit to ~28,000 characters to be safe
 const MAX_EMBEDDING_CHARS = 28000;
 
@@ -1179,7 +1182,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           namespace: reqNamespace,
           fileKey: reqFileKey,
           fileName: reqFileName,
-          phase = 'embeddings'
+          phase = 'embeddings',
+          subfolderId
         } = req.body;
 
         // Validate input
@@ -1200,7 +1204,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         namespace = reqNamespace;
         fileName = reqFileName;
 
-        console.log(`[PROCESS] Starting document processing for ${fileName} in namespace ${namespace}`);
+        // If subfolderId is provided, get the subfolder's Pinecone namespace
+        let pineconeNamespace = namespace;
+        if (subfolderId) {
+          const subfolder = await prisma.subfolder.findUnique({
+            where: { id: subfolderId },
+          });
+          if (subfolder) {
+            pineconeNamespace = subfolder.pineconeNamespace;
+            console.log(`[PROCESS] Using subfolder Pinecone namespace: ${pineconeNamespace}`);
+          } else {
+            console.warn(`[PROCESS] Subfolder ${subfolderId} not found, using base namespace`);
+          }
+        }
+
+        console.log(`[PROCESS] Starting document processing for ${fileName}`);
+        console.log(`[PROCESS] Base namespace: ${namespace}`);
+        console.log(`[PROCESS] Pinecone namespace: ${pineconeNamespace}`);
         console.log(`[PROCESS] File key: ${fileKey}`);
 
         // Get file from R2
@@ -1399,7 +1419,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               console.log(`[PROCESS] Generating embeddings for FAQ batch ${startBatch + i + 1} (${questions.length} questions)`);
               const batchEmbeddings = await retryWithBackoff(async () => {
                 const resp = await openai.embeddings.create({
-                  model: 'text-embedding-ada-002',
+                  model: 'text-embedding-3-small',
                   input: questions
                 });
                 return resp.data.map((d: any) => d.embedding);
@@ -1447,7 +1467,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               for (let i = 0; i < vectors.length; i += VECTOR_BATCH_SIZE) {
                 vectorBatches.push(vectors.slice(i, i + VECTOR_BATCH_SIZE));
               }
-              const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(namespace);
+              const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(pineconeNamespace);
               for (let i = 0; i < vectorBatches.length; i++) {
                 await retryWithBackoff(async () => {
                   await index.upsert(vectorBatches[i] as any);
@@ -1498,7 +1518,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               console.log(`[PROCESS] Generating embeddings for smart batch ${startBatch + i + 1} (${texts.length} chunks)`);
               const batchEmbeddings = await retryWithBackoff(async () => {
                 const resp = await openai.embeddings.create({
-                  model: 'text-embedding-ada-002',
+                  model: 'text-embedding-3-small',
                   input: texts
                 });
                 return resp.data.map((d: any) => d.embedding);
@@ -1561,7 +1581,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               for (let i = 0; i < vectors.length; i += VECTOR_BATCH_SIZE) {
                 vectorBatches.push(vectors.slice(i, i + VECTOR_BATCH_SIZE));
               }
-              const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(namespace);
+              const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(pineconeNamespace);
               for (let i = 0; i < vectorBatches.length; i++) {
                 await retryWithBackoff(async () => {
                   await index.upsert(vectorBatches[i] as any);
@@ -1591,7 +1611,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
             console.log(`[PROCESS] Split vectors into ${vectorBatches.length} Pinecone batches of size ${VECTOR_BATCH_SIZE}`);
 
-            const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(namespace);
+            const index = pinecone.Index(process.env.PINECONE_INDEX!).namespace(pineconeNamespace);
             for (let i = 0; i < vectorBatches.length; i++) {
               console.log(`[PROCESS] Upserting Pinecone batch ${i + 1}/${vectorBatches.length} (${vectorBatches[i].length} vectors)`);
               await retryWithBackoff(async () => {
@@ -1606,19 +1626,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           console.log('[PROCESS] Updating document manifest...');
           
           // Include document type and chunk count in manifest
+          // Use pineconeNamespace for manifest to ensure documents are stored in the correct namespace
           const newDocument: DocumentManifest = {
             id: fileKey,
             source: fileName,
             r2Url: fileKey,
             createdAt: new Date().toISOString(),
-            namespace,
+            namespace: pineconeNamespace,
             hash: documentHash,
             documentType: finalDocType.toLowerCase() as 'faq' | 'glossary' | 'standard',
             chunkCount: effectiveChunkCount
           };
 
           try {
-            await updateManifestInR2(namespace, newDocument);
+            await updateManifestInR2(pineconeNamespace, newDocument);
             console.log('[PROCESS] Manifest updated successfully');
           } catch (error) {
             if (

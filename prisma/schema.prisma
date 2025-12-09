@@ -41,14 +41,30 @@ model Company {
 }
 
 model Department {
-  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  id                String     @id @default(auto()) @map("_id") @db.ObjectId
   name              String
-  company           Company  @relation(fields: [companyId], references: [id])
+  company           Company    @relation(fields: [companyId], references: [id])
   companyId         String
   users             User[]
-  createdAt         DateTime @default(now())
+  subfolders        Subfolder[]
+  createdAt         DateTime   @default(now())
   namespace         String
   externalNamespace String
+}
+
+model Subfolder {
+  id                String     @id @default(auto()) @map("_id") @db.ObjectId
+  name              String
+  department        Department @relation(fields: [departmentId], references: [id])
+  departmentId      String
+  namespaceType     NamespaceType
+  pineconeNamespace String     // Full Pinecone namespace: existing_namespace-subfolder_name
+  createdAt         DateTime   @default(now())
+}
+
+enum NamespaceType {
+  INTERNAL
+  EXTERNAL
 }
 
 model AuthorizedAdmin {

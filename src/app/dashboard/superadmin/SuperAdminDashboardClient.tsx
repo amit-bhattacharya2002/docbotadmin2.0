@@ -182,26 +182,27 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-black">
+    <div className="min-h-screen flex flex-col bg-[#0a0a0a]">
       {/* Header */}
-      <header className="flex items-center justify-between px-8 py-4 bg-white/10 backdrop-blur-lg border-b border-white/20">
-        <div className="flex items-center gap-2 text-white text-2xl font-bold">
-          <span>{company?.name || "Company"}</span>
-          <span className="text-blue-400 font-semibold">Docbot</span>
+      <header className="flex items-center h-16 justify-between px-8 bg-[#111111] border-b border-white/5 relative z-50">
+        <div className="flex items-center gap-3 text-white">
+          <span className="text-lg tracking-tight">{company?.name || "Company"}</span>
+          <span className="text-gray-500">/</span>
+          <span className="text-lg tracking-tight text-white">Super Admin</span>
         </div>
         <div className="relative">
           <button
-            className="flex items-center gap-2 px-4 py-2 bg-white/20 rounded-lg text-white hover:bg-white/30 focus:outline-none"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-500/10 rounded-lg text-blue-400 hover:bg-blue-500/20 transition-all duration-200 border border-white/5"
             onClick={() => setDropdownOpen((open) => !open)}
           >
-            <span>{user?.name || "User"}</span>
+            <span className="text-sm tracking-tight">{user?.name || "User"}</span>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
           </button>
           {dropdownOpen && (
-            <div className="absolute right-0 mt-2 w-40 bg-white/90 rounded-lg shadow-lg z-10">
-              <div className="px-4 py-2 text-gray-800 border-b">{user?.name || "User"}</div>
+            <div className="absolute right-0 mt-2 w-48 bg-[#1a1a1a] border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+              <div className="px-4 py-3 text-blue-300 border-b border-white/5 text-sm tracking-tight">{user?.name || "User"}</div>
               <button
-                className="w-full px-4 py-2 text-left text-red-600 hover:bg-gray-100 rounded-b-lg disabled:opacity-60"
+                className="w-full px-4 py-3 text-left text-red-400 hover:bg-blue-500/10 transition-colors text-sm tracking-tight disabled:opacity-60"
                 onClick={handleLogout}
                 disabled={loggingOut}
               >
@@ -213,22 +214,22 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
       </header>
       <div className="flex flex-1">
         {/* Sidebar */}
-        <aside className="w-64 bg-gray-900 border-r border-white/10 flex flex-col py-8">
+        <aside className="w-64 bg-[#111111] border-r border-white/5 flex flex-col py-6">
           <button
-            className={`px-6 py-3 text-left text-lg font-semibold transition-colors ${
+            className={`px-6 py-2.5 text-left text-sm tracking-tight transition-all duration-200 mx-2 rounded-lg mb-1 ${
               activeTab === "Departments"
                 ? "bg-blue-600 text-white"
-                : "text-gray-300 hover:bg-blue-500/20"
+                : "text-gray-400 hover:text-blue-400 hover:bg-blue-500/10"
             }`}
             onClick={() => setActiveTab("Departments")}
           >
             Departments
           </button>
           <button
-            className={`px-6 py-3 text-left text-lg font-semibold transition-colors ${
+            className={`px-6 py-2.5 text-left text-sm tracking-tight transition-all duration-200 mx-2 rounded-lg mb-1 ${
               activeTab === "Department Admins"
                 ? "bg-blue-600 text-white"
-                : "text-gray-300 hover:bg-blue-500/20"
+                : "text-gray-400 hover:text-blue-400 hover:bg-blue-500/10"
             }`}
             onClick={() => setActiveTab("Department Admins")}
           >
@@ -237,22 +238,22 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
           <div className="flex-1" />
         </aside>
         {/* Main Content */}
-        <main className="flex-1 p-8 overflow-auto">
+        <main className="flex-1 p-8 overflow-auto bg-[#0a0a0a]">
           {activeTab === "Departments" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               {/* Department List */}
               <div>
-                <div className="flex items-center gap-2 mb-4">
-                  <h3 className="text-xl font-bold text-white">All Departments</h3>
+                <div className="flex items-center gap-2 mb-6">
+                  <h3 className="text-base tracking-tight text-white">All Departments</h3>
                   <button
                     onClick={handleRefreshDepartments}
                     disabled={refreshingDepts}
-                    className="p-1 rounded-full hover:bg-white/20 focus:outline-none"
+                    className="p-2 rounded-lg hover:bg-blue-500/10 transition-all duration-200"
                     title="Refresh"
                   >
                     {refreshingDepts ? (
                       <svg
-                        className="w-5 h-5 text-white animate-spin"
+                        className="w-4 h-4 text-blue-400 animate-spin"
                         xmlns="http://www.w3.org/2000/svg"
                         fill="none"
                         viewBox="0 0 24 24"
@@ -273,7 +274,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                       </svg>
                     ) : (
                       <svg
-                        className="w-5 h-5 text-white"
+                        className="w-4 h-4 text-blue-400"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -286,12 +287,12 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                 </div>
                 <ul className="space-y-2">
                   {departments.map((dept) => (
-                    <li key={dept.id} className="bg-white/20 text-white px-4 py-2 rounded-lg flex justify-between items-center">
-                      <span>{dept.name}</span>
+                    <li key={dept.id} className="bg-blue-500/10 border border-white/10 text-blue-300 px-4 py-3 rounded-lg flex justify-between items-center hover:bg-blue-500/20 transition-all duration-200">
+                      <span className="text-sm tracking-tight">{dept.name}</span>
                       <button
                         onClick={() => handleDeleteDepartment(dept.id)}
                         disabled={deletingDept === dept.id}
-                        className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition-colors disabled:opacity-50"
+                        className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs tracking-tight rounded-lg transition-all duration-200 disabled:opacity-40"
                       >
                         {deletingDept === dept.id ? "Deleting..." : "Delete"}
                       </button>
@@ -301,10 +302,10 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
               </div>
               {/* Add Department Form */}
               <div>
-                <h3 className="text-xl font-bold text-white mb-4">Create New Department</h3>
+                <h3 className="text-base tracking-tight text-white mb-6">Create New Department</h3>
                 <form onSubmit={handleAddDepartment} className="flex flex-col gap-4">
                   <input
-                    className="px-4 py-3 rounded-lg bg-white/20 text-white placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="px-4 py-3 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 placeholder:text-gray-500 text-sm tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     placeholder="Department Name"
                     value={newDept}
                     onChange={(e) => setNewDept(e.target.value)}
@@ -312,12 +313,12 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                   />
                   <button
                     type="submit"
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors"
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-sm tracking-tight py-3 rounded-lg transition-all duration-200 disabled:opacity-40"
                     disabled={loading}
                   >
                     {loading ? "Adding..." : "Add Department"}
                   </button>
-                  {status && <div className="text-white text-sm mt-2">{status}</div>}
+                  {status && <div className="text-blue-300 text-xs tracking-tight mt-2">{status}</div>}
                 </form>
               </div>
             </div>
@@ -326,16 +327,16 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
             <div className="flex flex-col md:flex-row gap-8">
               <div className="w-full h-full max-w-2xl ">
                 <div className="flex items-center gap-2 mb-6">
-                  <h3 className="text-2xl font-semibold text-white tracking-tight">Department Admins</h3>
+                  <h3 className="text-base tracking-tight text-white">Department Admins</h3>
                   <button
                     onClick={handleRefreshAdmins}
                     disabled={refreshingAdmins}
-                    className="p-1 rounded-full hover:bg-white/20 focus:outline-none"
+                    className="p-2 rounded-lg hover:bg-blue-500/10 transition-all duration-200"
                     title="Refresh"
                   >
                     {refreshingAdmins ? (
                       <svg
-                        className="w-5 h-5 text-white animate-spin"
+                        className="w-4 h-4 text-blue-400 animate-spin"
                         xmlns="http://www.w3.org/2000/svg"
                         fill="none"
                         viewBox="0 0 24 24"
@@ -356,7 +357,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                       </svg>
                     ) : (
                       <svg
-                        className="w-5 h-5 text-white"
+                        className="w-4 h-4 text-blue-400"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -367,25 +368,25 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                     )}
                   </button>
                 </div>
-                {localDepartmentAdmins.length === 0 && <div className="text-gray-400">No Department Admins found.</div>}
+                {localDepartmentAdmins.length === 0 && <div className="text-gray-500 text-xs tracking-tight">No Department Admins found.</div>}
                 {localDepartmentAdmins.map((group) => (
                   <div key={group.departmentId} className="mb-8">
-                    <div className="text-base font-medium text-blue-400 mb-2 uppercase tracking-wide pl-1">{group.departmentName}</div>
+                    <div className="text-sm tracking-tight text-blue-400 mb-3 uppercase pl-1">{group.departmentName}</div>
                     {group.admins.length === 0 ? (
-                      <div className="text-gray-400 text-sm mb-2 pl-1">No admins for this department.</div>
+                      <div className="text-gray-500 text-xs tracking-tight mb-2 pl-1">No admins for this department.</div>
                     ) : (
                       <ul className="space-y-2">
                         {group.admins.map((admin) => (
                           <li
                             key={admin.id}
-                            className="bg-white/10 hover:bg-white/20 transition-colors text-white px-4 py-3 rounded-lg flex flex-col sm:flex-row sm:items-center sm:gap-6 border border-white/10"
+                            className="bg-blue-500/10 border border-white/10 hover:bg-blue-500/20 transition-all duration-200 text-blue-300 px-4 py-3 rounded-lg flex flex-col sm:flex-row sm:items-center sm:gap-6"
                           >
-                            <span className="font-semibold text-base leading-tight">{admin.name}</span>
-                            <span className="text-xs text-gray-300 sm:ml-2">{admin.email}</span>
+                            <span className="text-sm tracking-tight leading-tight">{admin.name}</span>
+                            <span className="text-xs text-gray-500 sm:ml-2 tracking-tight">{admin.email}</span>
                             <button
                               onClick={() => handleDeleteAdmin(admin.id, group.departmentId)}
                               disabled={deletingAdmin === admin.id}
-                              className="sm:ml-auto px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors disabled:opacity-50"
+                              className="sm:ml-auto px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs tracking-tight rounded-lg transition-all duration-200 disabled:opacity-40"
                             >
                               {deletingAdmin === admin.id ? "Deleting..." : "Delete"}
                             </button>
@@ -397,11 +398,11 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                 ))}
               </div>
               {/* Create Department Admin Form */}
-              <div className="w-full h-full max-w-md bg-white/5 rounded-xl shadow p-6 border border-white">
-                <h3 className="text-xl font-semibold text-white mb-4">Create Department Admin</h3>
+              <div className="w-full h-full max-w-md bg-[#111111] rounded-xl border border-white/10 p-6">
+                <h3 className="text-base tracking-tight text-white mb-6">Create Department Admin</h3>
                 <form onSubmit={handleCreateAdmin} className="flex flex-col gap-4">
                   <input
-                    className="px-4 py-2 rounded bg-white/10 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    className="px-4 py-2.5 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm tracking-tight"
                     name="name"
                     placeholder="Name"
                     value={adminForm.name}
@@ -409,7 +410,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                     required
                   />
                   <input
-                    className="px-4 py-2 rounded bg-white/10 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    className="px-4 py-2.5 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm tracking-tight"
                     name="email"
                     type="email"
                     placeholder="Email"
@@ -418,7 +419,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                     required
                   />
                   <input
-                    className="px-4 py-2 rounded bg-white/10 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    className="px-4 py-2.5 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm tracking-tight"
                     name="adminId"
                     placeholder="Admin ID"
                     value={adminForm.adminId}
@@ -426,7 +427,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                     required
                   />
                   <input
-                    className="px-4 py-2 rounded bg-white/10 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    className="px-4 py-2.5 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm tracking-tight"
                     name="password"
                     type="password"
                     placeholder="Password"
@@ -438,7 +439,7 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                     name="departmentId"
                     value={adminForm.departmentId}
                     onChange={handleAdminFormChange}
-                    className="px-4 py-2 rounded bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    className="px-4 py-2.5 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm tracking-tight"
                     required
                   >
                     {departments.map((dept) => (
@@ -447,12 +448,12 @@ export default function SuperAdminDashboardClient({ user, company, departments: 
                   </select>
                   <button
                     type="submit"
-                    className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded transition-colors text-sm"
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-sm tracking-tight py-2.5 rounded-lg transition-all duration-200 disabled:opacity-40"
                     disabled={adminLoading}
                   >
                     {adminLoading ? "Creating..." : "Create Department Admin"}
                   </button>
-                  {adminStatus && <div className="text-white text-xs mt-2">{adminStatus}</div>}
+                  {adminStatus && <div className="text-blue-300 text-xs tracking-tight mt-2">{adminStatus}</div>}
                 </form>
               </div>
             </div>
