@@ -370,6 +370,7 @@ function UploadDocumentPanel({
   selectedFolderName?: string;
 }) {
   const [file, setFile] = useState<File | null>(null);
+  const [docTypeHint, setDocTypeHint] = useState<'faq' | 'glossary' | 'manual' | ''>('');
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number; message: string; stage: string } | null>(null);
@@ -458,6 +459,7 @@ function UploadDocumentPanel({
             fileKey,
             fileName: file.name,
             subfolderId: selectedSubfolderId || undefined,
+            docTypeHint: docTypeHint || undefined,
           }),
         });
         if (!processResponse.ok) {
@@ -484,6 +486,7 @@ function UploadDocumentPanel({
               fileName: file.name,
               startBatch: data.nextBatch,
               subfolderId: selectedSubfolderId || undefined,
+              docTypeHint: docTypeHint || undefined,
             }),
           });
           if (!nextProcessResponse.ok) {
@@ -507,6 +510,7 @@ function UploadDocumentPanel({
           setStatus(data.message);
         }
         setFile(null);
+        setDocTypeHint('');
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
@@ -591,6 +595,22 @@ function UploadDocumentPanel({
             >
               {loading ? "Uploading..." : "Upload"}
             </button>
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className="text-xs text-gray-400 tracking-tight">Document Type (Optional)</label>
+            <select
+              value={docTypeHint}
+              onChange={(e) => setDocTypeHint(e.target.value as 'faq' | 'glossary' | 'manual' | '')}
+              className="px-4 py-2.5 rounded-lg bg-blue-500/10 border border-white/10 text-blue-300 text-sm tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="">Auto-detect</option>
+              <option value="faq">FAQ (Q&A Format)</option>
+              <option value="glossary">Glossary</option>
+              <option value="manual">Manual (Large PDF)</option>
+            </select>
+            <p className="text-xs text-gray-500 tracking-tight mt-1">
+              Select a type to optimize processing. Leave as "Auto-detect" for automatic detection.
+            </p>
           </div>
           {file && (
             <div className="text-xs text-gray-400 px-3 py-2.5 bg-blue-500/10 rounded-lg border border-white/10 break-words overflow-wrap-anywhere" title={file.name}>

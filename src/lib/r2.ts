@@ -43,7 +43,7 @@ export interface DocumentManifest {
   namespace: string;
   hash?: string;
   // Document type support
-  documentType?: 'faq' | 'glossary' | 'standard';
+  documentType?: 'faq' | 'glossary' | 'standard' | 'manual';
   chunkCount?: number;
 }
 
