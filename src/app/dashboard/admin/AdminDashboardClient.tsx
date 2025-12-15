@@ -98,7 +98,7 @@ export default function AdminDashboardClient({
                     <input
                       type="text"
                       readOnly
-                      value={`https://docbotv2.vercel.app/company/${companyId}/department/${departmentId}`}
+                      value={`https://docbot.meaningfulinnovations.org/company/${companyId}/department/${departmentId}`}
                       className="flex-1 bg-blue-500/10 border border-white/10 text-blue-300 text-xs tracking-tight px-4 py-2.5 rounded-lg focus:outline-none"
                     />
                     <button
