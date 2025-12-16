@@ -63,7 +63,7 @@ export default function AdminDashboardClient({
           >
             External Documents
           </button>
-          <button
+          {/* <button
             className={`px-6 py-2.5 text-left text-sm tracking-tight transition-all duration-200 mx-2 rounded-lg mb-1 ${
               activeTab === "FAQ Generator"
                 ? "bg-blue-600 text-white"
@@ -72,7 +72,7 @@ export default function AdminDashboardClient({
             onClick={() => setActiveTab("FAQ Generator")}
           >
             FAQ Generator
-          </button>
+          </button> */}
         </aside>
         
         {/* Sidebar Toggle Button (when collapsed) */}
