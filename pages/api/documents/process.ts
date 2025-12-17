@@ -32,6 +32,10 @@ const RETRY_DELAY = 1000;
 // ~4 characters per token, so limit to ~28,000 characters to be safe
 const MAX_EMBEDDING_CHARS = 28000;
 
+// MANUALS ONLY: chunk pointer storage constants
+const MANUAL_PREVIEW_CHARS = 1200;
+const MANUAL_CHUNK_PREFIX = "doc_chunks";
+
 /**
  * Truncate text to fit within embedding model's token limit
  */
@@ -47,6 +51,86 @@ function truncateForEmbedding(text: string): string {
     return truncated.slice(0, lastPeriod + 1);
   }
   return truncated;
+}
+
+/**
+ * MANUALS ONLY: Generate stable docId from namespace, fileKey, and documentHash
+ */
+function generateDocId(pineconeNamespace: string, fileKey: string, documentHash: string): string {
+  return crypto.createHash('sha256')
+    .update(`${pineconeNamespace}${fileKey}${documentHash}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+/**
+ * MANUALS ONLY: Generate stable chunkId from docId, chunkIndex, and chunk hash
+ */
+function generateChunkId(docId: string, chunkIndex: number, chunkHash: string): string {
+  return crypto.createHash('sha256')
+    .update(`${docId}${chunkIndex}${chunkHash}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+/**
+ * MANUALS ONLY: Upload chunk JSON to R2
+ */
+async function uploadChunkToR2(
+  pineconeNamespace: string,
+  docId: string,
+  chunk: SmartChunk,
+  chunkIndex: number,
+  chunkId: string,
+  fileName: string
+): Promise<string> {
+  const chunkData = {
+    docId,
+    chunkId,
+    chunkIndex,
+    pageStart: chunk.pageStart,
+    pageEnd: chunk.pageEnd,
+    source: fileName,
+    text: chunk.text // Full untruncated text
+  };
+
+  const r2Key = `${MANUAL_CHUNK_PREFIX}/${pineconeNamespace}/${docId}/chunks/${chunkIndex}-${chunkId}.json`;
+  const buffer = Buffer.from(JSON.stringify(chunkData, null, 2));
+  
+  await uploadToR2(buffer, r2Key, 'application/json');
+  console.log(`[MANUAL] Uploaded chunk ${chunkIndex} to R2: ${r2Key}`);
+  
+  return r2Key;
+}
+
+/**
+ * MANUALS ONLY: Upload chunk manifest to R2
+ */
+async function uploadChunkManifestToR2(
+  pineconeNamespace: string,
+  docId: string,
+  manifest: {
+    docId: string;
+    source: string;
+    fileKey: string;
+    namespace: string;
+    documentHash: string;
+    documentType: string;
+    chunkCount: number;
+    chunks: Array<{
+      chunkIndex: number;
+      chunkId: string;
+      pageStart: number;
+      pageEnd: number;
+      r2Key: string;
+    }>;
+  }
+): Promise<void> {
+  const r2Key = `${MANUAL_CHUNK_PREFIX}/${pineconeNamespace}/${docId}/manifest.json`;
+  const buffer = Buffer.from(JSON.stringify(manifest, null, 2));
+  
+  await uploadToR2(buffer, r2Key, 'application/json');
+  console.log(`[MANUAL] Uploaded chunk manifest to R2: ${r2Key}`);
 }
 
 // Increased timeouts
@@ -112,46 +196,122 @@ async function retryWithBackoff<T>(
  * Updated parsePDF: split into page-wise text, then group every 5 pages into one block.
  * Each element of the returned array is a string containing up to 5 pages' worth of text.
  */
-async function parsePDF(buffer: Buffer): Promise<Array<{ text: string; pageStart: number; pageEnd: number }>> {
-  const data = await pdfParse(buffer, {
+type PageText = { pageNumber: number; text: string };
+type Block = { text: string; pageStart: number; pageEnd: number };
+
+function normalizePdfText(s: string): string {
+  return s
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function computeMissingPages(extracted: number[], expectedTotal?: number): {
+  nums: number[];
+  missing: number[];
+  expectedTotal: number | undefined;
+} {
+  const nums = [...new Set(extracted)].sort((a, b) => a - b);
+  const missing: number[] = [];
+
+  // If pdf claims total pages, check 1..total
+  if (expectedTotal && expectedTotal > 0) {
+    const set = new Set(nums);
+    for (let p = 1; p <= expectedTotal; p++) {
+      if (!set.has(p)) missing.push(p);
+    }
+    return { nums, missing, expectedTotal };
+  }
+
+  // Otherwise just look for gaps between extracted pages
+  for (let i = 0; i < nums.length - 1; i++) {
+    for (let p = nums[i] + 1; p < nums[i + 1]; p++) missing.push(p);
+  }
+
+  return { nums, missing, expectedTotal: undefined as number | undefined };
+}
+
+async function parsePDF(
+  buffer: Buffer,
+  opts?: { pagesPerBlock?: number; minCharsPerPage?: number }
+): Promise<{ blocks: Block[]; extractedPages: number[]; expectedPages?: number; missingPages: number[] }> {
+  const PAGES_PER_BLOCK = opts?.pagesPerBlock ?? 5;
+  const MIN_CHARS_PER_PAGE = opts?.minCharsPerPage ?? 20;
+
+  const data: any = await pdfParse(buffer, {
     pagerender: async (pageData: any) => {
-      // Reconstruct each page's text by joining items
-      const textContent = await pageData.getTextContent();
-      const pageLines = textContent.items.map((item: any) => item.str).join(' ');
-      // Prepend a "Page N" banner
+      const tc = await pageData.getTextContent();
+      const pageLines = tc.items.map((it: any) => it.str).join(' ');
       return `Page ${pageData.pageNumber}\n${pageLines}`;
     },
-    max: 0 // ignore pdf-parse's default paging logic
+    max: 0
   });
 
-  // Split on our "Page N" banner
-  const rawPages = data.text
-    .split(/(?=Page\s*\d+\n)/g) // keep the "Page N" prefix with each slice
-    .filter((p: string) => p.trim());
+  const expectedPages: number | undefined = typeof data?.numpages === 'number' ? data.numpages : undefined;
 
-  const cleanedPages = rawPages.map((pageStr: string) => {
-    return pageStr
-      .replace(/\n{2,}/g, '\n\n')  // collapse 2+ newlines into exactly two
-      .replace(/ {3,}/g, ' ')      // collapse 3+ spaces into one
-      .trim();
-  });
+  // Split on our own page banner
+  const rawPages = (data.text as string)
+    .split(/(?=Page\s*\d+\n)/g)
+    .map(p => p.trim())
+    .filter(Boolean);
 
-  const blocks: Array<{ text: string; pageStart: number; pageEnd: number }> = [];
-  const PAGES_PER_BLOCK = 5;
+  const pages: PageText[] = rawPages
+    .map(p => {
+      const m = p.match(/^Page\s*(\d+)\n/i);
+      if (!m) return null;
 
-  for (let i = 0; i < cleanedPages.length; i += PAGES_PER_BLOCK) {
-    const slice = cleanedPages.slice(i, i + PAGES_PER_BLOCK);
-    const blockText = slice.join('\n'); 
-    const startPage = i + 1;
-    const endPage = Math.min(i + PAGES_PER_BLOCK, cleanedPages.length);
+      const pageNumber = parseInt(m[1], 10);
+      const text = normalizePdfText(p);
 
-    // Only push if there's meaningful content beyond the "Page N" lines
-    if (blockText.replace(/Page\s*\d+\n/g, '').trim().length > 0) {
-      blocks.push({ text: blockText, pageStart: startPage, pageEnd: endPage });
+      return { pageNumber, text };
+    })
+    .filter((p): p is PageText => p !== null);
+
+  const extractedNums = pages.map(p => p.pageNumber);
+  const { nums, missing } = computeMissingPages(extractedNums, expectedPages);
+
+  const coverage =
+    expectedPages && expectedPages > 0 ? (nums.length / expectedPages) * 100 : undefined;
+
+  console.log(
+    `[PDF] expected=${expectedPages ?? 'unknown'} extracted=${nums.length}` +
+      (coverage != null ? ` coverage=${coverage.toFixed(1)}%` : '')
+  );
+
+  if (missing.length) {
+    console.warn(`[PDF] missing pages count=${missing.length} sample=${missing.slice(0, 30).join(', ')}`);
+  }
+
+  // Optional: track low-text pages (scanned / image-based pages)
+  const lowTextPages = pages.filter(p => {
+    const withoutBanner = p.text.replace(/^Page\s*\d+\n/i, '').trim();
+    return withoutBanner.length < MIN_CHARS_PER_PAGE;
+  }).map(p => p.pageNumber);
+
+  if (lowTextPages.length) {
+    console.warn(
+      `[PDF] low-text pages (likely scanned/image) count=${lowTextPages.length} sample=${lowTextPages
+        .slice(0, 30)
+        .join(', ')}`
+    );
+  }
+
+  // Build N-page blocks using the REAL page numbers
+  const blocks: Block[] = [];
+  for (let i = 0; i < pages.length; i += PAGES_PER_BLOCK) {
+    const slice = pages.slice(i, i + PAGES_PER_BLOCK);
+    const blockText = slice.map(s => s.text).join('\n');
+    const pageStart = slice[0].pageNumber;
+    const pageEnd = slice[slice.length - 1].pageNumber;
+    const meaningful = blockText.replace(/Page\s*\d+\n/g, '').trim();
+
+    if (meaningful.length > 0) {
+      blocks.push({ text: blockText, pageStart, pageEnd });
     }
   }
 
-  return blocks;
+  return { blocks, extractedPages: nums, expectedPages, missingPages: missing };
 }
 
 async function parseDocx(buffer: Buffer): Promise<string[]> {
@@ -274,6 +434,7 @@ interface SmartChunk {
   hash: string;
   chunkType: 'section' | 'paragraph' | 'list' | 'standard';
   sectionTitle?: string;
+  allHeadings?: string[]; // All headings found in the chunk
   links: string[];
   keywords: string[];
   hasList: boolean;
@@ -338,24 +499,116 @@ function detectDocumentStructure(text: string): {
 }
 
 /**
- * Extract section title from text (if any)
+ * Enhanced section title extraction - captures various heading patterns
+ * Returns the most prominent heading found in the text
  */
 function extractSectionTitle(text: string): string | undefined {
-  const lines = text.split('\n').slice(0, 3);
+  const lines = text.split('\n').slice(0, 10); // Check more lines (was 3)
+  
+  const headingPatterns = [
+    // Pattern 1: Markdown headers (# Header)
+    { pattern: /^#{1,6}\s+(.+)$/, extract: (m: RegExpMatchArray) => m[1].trim() },
+    
+    // Pattern 2: ALL CAPS headers (common in manuals)
+    { pattern: /^[A-Z][A-Z\s]{5,}$/, extract: (m: RegExpMatchArray) => m[0].trim() },
+    
+    // Pattern 3: Numbered sections (1. Header, 2. Header)
+    { pattern: /^\d+\.\s+([A-Z][^\n]{0,100})$/, extract: (m: RegExpMatchArray) => m[1].trim() },
+    
+    // Pattern 4: Title Case with colon (Header:)
+    { pattern: /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*):$/, extract: (m: RegExpMatchArray) => m[1].trim() },
+    
+    // Pattern 5: Report names (X Report, X by Y Report)
+    { pattern: /^([A-Z][a-z]+(?:\s+[a-z]+)*(?:\s+by\s+[A-Z][a-z]+(?:\s+[a-z]+)*)?\s+Report)$/i, extract: (m: RegExpMatchArray) => m[1].trim() },
+    
+    // Pattern 6: Bold/emphasized text (common in PDFs)
+    { pattern: /^\*\*([^*]+)\*\*$/, extract: (m: RegExpMatchArray) => m[1].trim() },
+    
+    // Pattern 7: Underlined text (common in PDFs)
+    { pattern: /^([A-Z][^\n]{10,80})\n[-=]+$/, extract: (m: RegExpMatchArray) => m[1].trim() },
+    
+    // Pattern 8: Short lines in title case (potential headings)
+    { pattern: /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,6})$/, extract: (m: RegExpMatchArray) => m[1].trim() },
+  ];
+  
+  // Check each line against all patterns
   for (const line of lines) {
     const trimmed = line.trim();
-    // Check for header patterns
-    if (/^#{1,6}\s+(.+)$/.test(trimmed)) {
-      return trimmed.replace(/^#{1,6}\s+/, '');
-    }
-    if (/^[A-Z][A-Z\s]{5,}$/.test(trimmed) && trimmed.length < 100) {
-      return trimmed;
-    }
-    if (/^\d+\.\s+[A-Z].+$/.test(trimmed) && trimmed.length < 100) {
-      return trimmed;
+    if (!trimmed || trimmed.length < 3) continue;
+    
+    // Skip page numbers and common non-headings
+    if (/^Page\s+\d+$/i.test(trimmed)) continue;
+    if (/^\d+$/i.test(trimmed)) continue;
+    
+    for (const { pattern, extract } of headingPatterns) {
+      const match = trimmed.match(pattern);
+      if (match) {
+        const heading = extract(match);
+        // Validate heading length and content
+        if (heading.length >= 3 && heading.length <= 200 && !heading.includes('http')) {
+          return heading;
+        }
+      }
     }
   }
+  
   return undefined;
+}
+
+/**
+ * Extract all headings from text for better searchability
+ * Returns array of all headings found
+ */
+function extractAllHeadings(text: string): string[] {
+  const lines = text.split('\n');
+  const headings: string[] = [];
+  const seen = new Set<string>();
+  
+  const headingPatterns = [
+    { pattern: /^#{1,6}\s+(.+)$/, extract: (m: RegExpMatchArray) => m[1].trim() },  // Markdown
+    { pattern: /^[A-Z][A-Z\s]{5,}$/, extract: (m: RegExpMatchArray) => m[0].trim() },  // ALL CAPS
+    { pattern: /^\d+\.\s+([A-Z][^\n]{0,100})$/, extract: (m: RegExpMatchArray) => m[1].trim() },  // Numbered
+    { pattern: /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*):$/, extract: (m: RegExpMatchArray) => m[1].trim() },  // Title: format
+    { pattern: /^([A-Z][a-z]+(?:\s+[a-z]+)*(?:\s+by\s+[A-Z][a-z]+(?:\s+[a-z]+)*)?\s+Report)$/i, extract: (m: RegExpMatchArray) => m[1].trim() },  // Reports
+    { pattern: /^\*\*([^*]+)\*\*$/, extract: (m: RegExpMatchArray) => m[1].trim() },  // Bold
+    { pattern: /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,6})$/, extract: (m: RegExpMatchArray) => m[1].trim() },  // Title case
+  ];
+  
+  // Check first 20 lines for single-line headings
+  for (let i = 0; i < Math.min(20, lines.length); i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed || trimmed.length < 3 || trimmed.length > 200) continue;
+    if (/^Page\s+\d+$/i.test(trimmed)) continue;
+    if (/^\d+$/i.test(trimmed)) continue;
+    
+    // Check for underlined headings (spans two lines)
+    if (i < lines.length - 1) {
+      const nextLine = lines[i + 1].trim();
+      if (/^[-=]+$/.test(nextLine) && trimmed.length >= 10 && trimmed.length <= 80) {
+        const heading = trimmed;
+        if (!heading.includes('http') && !seen.has(heading.toLowerCase())) {
+          headings.push(heading);
+          seen.add(heading.toLowerCase());
+          i++; // Skip the underline line
+          continue;
+        }
+      }
+    }
+    
+    // Check single-line patterns
+    for (const { pattern, extract } of headingPatterns) {
+      const match = trimmed.match(pattern);
+      if (match) {
+        const heading = extract(match);
+        if (heading && !heading.includes('http') && !seen.has(heading.toLowerCase())) {
+          headings.push(heading);
+          seen.add(heading.toLowerCase());
+        }
+      }
+    }
+  }
+  
+  return headings;
 }
 
 /**
@@ -428,18 +681,22 @@ function smartChunkDocument(
         // Section fits in one chunk
         const hash = crypto.createHash('sha256').update(section.content).digest('hex').slice(0, 32);
         const links = extractLinks(section.content);
+        const allHeadings = extractAllHeadings(section.content);
+        const sectionTitle = section.title || extractSectionTitle(section.content) || allHeadings[0];
         // Debug: Log links for section chunk
         console.log(`[SMART-CHUNK section] Preview: "${section.content.slice(0, 60)}..."`);
         console.log(`[SMART-CHUNK section] Links (${links.length}): ${links.length > 0 ? links.join(' | ') : 'NONE'}`);
+        console.log(`[SMART-CHUNK section] Headings (${allHeadings.length}): ${allHeadings.length > 0 ? allHeadings.join(' | ') : 'NONE'}`);
         chunks.push({
           text: section.content,
           pageStart,
           pageEnd,
           hash,
           chunkType: 'section',
-          sectionTitle: section.title || extractSectionTitle(section.content),
+          sectionTitle: sectionTitle,
+          allHeadings: allHeadings.length > 0 ? allHeadings : undefined,
           links,
-          keywords: extractKeywords(section.content),
+          keywords: [...extractKeywords(section.content), ...allHeadings.map(h => h.toLowerCase())],
           hasList: /^[\s]*[-•*\d]+[.)]\s+/m.test(section.content),
           hasTable: /\|.+\|/.test(section.content)
         });
@@ -452,15 +709,18 @@ function smartChunkDocument(
           // Debug: Log links for paragraph chunk
           console.log(`[SMART-CHUNK paragraph] Preview: "${sub.slice(0, 60)}..."`);
           console.log(`[SMART-CHUNK paragraph] Links (${links.length}): ${links.length > 0 ? links.join(' | ') : 'NONE'}`);
+          const allHeadings = extractAllHeadings(sub);
+          const sectionTitle = section.title || extractSectionTitle(sub) || allHeadings[0];
           chunks.push({
             text: sub,
             pageStart,
             pageEnd,
             hash,
             chunkType: 'paragraph',
-            sectionTitle: section.title || undefined,
+            sectionTitle: sectionTitle,
+            allHeadings: allHeadings.length > 0 ? allHeadings : undefined,
             links,
-            keywords: extractKeywords(sub),
+            keywords: [...extractKeywords(sub), ...allHeadings.map(h => h.toLowerCase())],
             hasList: /^[\s]*[-•*\d]+[.)]\s+/m.test(sub),
             hasTable: /\|.+\|/.test(sub)
           });
@@ -477,15 +737,18 @@ function smartChunkDocument(
       // Debug: Log links for standard chunk
       console.log(`[SMART-CHUNK standard] Preview: "${sub.slice(0, 60)}..."`);
       console.log(`[SMART-CHUNK standard] Links (${links.length}): ${links.length > 0 ? links.join(' | ') : 'NONE'}`);
+      const allHeadings = extractAllHeadings(sub);
+      const sectionTitle = extractSectionTitle(sub) || allHeadings[0];
       chunks.push({
         text: sub,
         pageStart,
         pageEnd,
         hash,
         chunkType: 'standard',
-        sectionTitle: extractSectionTitle(sub),
+        sectionTitle: sectionTitle,
+        allHeadings: allHeadings.length > 0 ? allHeadings : undefined,
         links,
-        keywords: extractKeywords(sub),
+        keywords: [...extractKeywords(sub), ...allHeadings.map(h => h.toLowerCase())],
         hasList: /^[\s]*[-•*\d]+[.)]\s+/m.test(sub),
         hasTable: /\|.+\|/.test(sub)
       });
@@ -574,7 +837,8 @@ function chunkGlossaryHeadingParagraph(
 
   let currentHeading: string | null = null;
   let currentBody: string[] = [];
-  const totalPages = blockData[blockData.length - 1]?.pageEnd || 1;
+  const maxPage = Math.max(...blockData.map(b => b.pageEnd), 1);
+  const totalPages = maxPage;
 
   const flush = () => {
     if (!currentHeading || currentBody.length === 0) return;
@@ -585,6 +849,7 @@ function chunkGlossaryHeadingParagraph(
     const fullText = `${currentHeading}\n\n${bodyText}`;
     const hash = crypto.createHash('sha256').update(fullText).digest('hex').slice(0, 32);
     const links = extractLinks(fullText);
+    const allHeadings = extractAllHeadings(fullText);
 
     chunks.push({
       text: fullText,
@@ -593,8 +858,9 @@ function chunkGlossaryHeadingParagraph(
       hash,
       chunkType: 'paragraph',
       sectionTitle: currentHeading,
+      allHeadings: allHeadings.length > 0 ? allHeadings : undefined,
       links,
-      keywords: extractKeywords(fullText),
+      keywords: [...extractKeywords(fullText), ...allHeadings.map(h => h.toLowerCase())],
       hasList: /^[\s]*[-•*\d]+[.)]\s+/m.test(fullText),
       hasTable: /\|.+\|/.test(fullText),
       term: currentHeading
@@ -710,10 +976,63 @@ function buildSmartChunkMetadata(
   fileKey: string,
   totalChunks: number,
   chunkIndex: number,
-  opts?: { strategy?: 'glossary' | 'manual' | 'standard' }
+  opts?: { strategy?: 'glossary' | 'manual' | 'standard'; docId?: string; chunkId?: string; chunkTextR2Key?: string }
 ): Record<string, any> {
   const contactInfo = detectContactInfo(chunk.text);
   
+  // Combine sectionTitle and allHeadings for better searchability
+  const allHeadingKeywords = [
+    chunk.sectionTitle,
+    ...(chunk.allHeadings || [])
+  ]
+    .filter(Boolean)
+    .map(h => h!.toLowerCase())
+    .filter((h, i, arr) => arr.indexOf(h) === i); // Remove duplicates
+  
+  // MANUALS ONLY: Use pointer storage instead of full text
+  if (opts?.strategy === 'manual' && opts?.docId && opts?.chunkId && opts?.chunkTextR2Key) {
+    return {
+      // Pointer fields
+      docId: opts.docId,
+      chunkId: opts.chunkId,
+      chunkTextR2Key: opts.chunkTextR2Key,
+      textPreview: chunk.text.slice(0, MANUAL_PREVIEW_CHARS), // Preview only
+      
+      // Standard fields
+      source: fileName,
+      r2Url: fileKey,
+      documentType: 'manual',
+      
+      // Structure metadata
+      chunkType: chunk.chunkType,
+      sectionTitle: chunk.sectionTitle?.slice(0, 200),
+      allHeadings: chunk.allHeadings?.slice(0, 10),
+      hasList: chunk.hasList,
+      hasTable: chunk.hasTable,
+      
+      // Links and contact info
+      links: chunk.links.slice(0, 10),
+      hasLinks: chunk.links.length > 0,
+      ...contactInfo,
+      
+      // Search optimization - include headings in keywords
+      keywords: [
+        ...chunk.keywords,
+        ...allHeadingKeywords
+      ].slice(0, 15),
+      
+      // Position info
+      pageStart: chunk.pageStart,
+      pageEnd: chunk.pageEnd,
+      chunkIndex,
+      totalChunks,
+      
+      // Confidence scoring
+      confidence: calculateSmartConfidence(chunk, contactInfo),
+    };
+  }
+  
+  // FAQ/GLOSSARY/STANDARD: Keep existing behavior (full text in metadata)
   return {
     source: fileName,
     r2Url: fileKey,
@@ -722,6 +1041,7 @@ function buildSmartChunkMetadata(
     // Structure metadata
     chunkType: chunk.chunkType,
     sectionTitle: chunk.sectionTitle?.slice(0, 200),
+    allHeadings: chunk.allHeadings?.slice(0, 10), // Store all headings (limit to 10)
     hasList: chunk.hasList,
     hasTable: chunk.hasTable,
     
@@ -730,8 +1050,11 @@ function buildSmartChunkMetadata(
     hasLinks: chunk.links.length > 0,
     ...contactInfo,
     
-    // Search optimization
-    keywords: chunk.keywords,
+    // Search optimization - include headings in keywords
+    keywords: [
+      ...chunk.keywords,
+      ...allHeadingKeywords
+    ].slice(0, 15), // Limit total keywords
     
     // Position info
     pageStart: chunk.pageStart,
@@ -1415,6 +1738,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // Parse file content into 5-page blocks
         console.log('[PROCESS] Starting file parsing phase');
         let blockData: Array<{ text: string; pageStart: number; pageEnd: number }> = [];
+        let extractionInfo: { expectedPages?: number; extractedPages: number; missingPages: number[] } | undefined;
         
         // Track progress locally instead of writing to response
         const progress: ProcessingProgress = {
@@ -1424,7 +1748,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         if (fileName.toLowerCase().endsWith('.pdf')) {
           console.log('[PROCESS] Processing PDF file');
-          blockData = await parsePDF(fileBuffer);
+          const parsed = await parsePDF(fileBuffer, { pagesPerBlock: 5, minCharsPerPage: 20 });
+          blockData = parsed.blocks;
+          extractionInfo = {
+            expectedPages: parsed.expectedPages,
+            extractedPages: parsed.extractedPages.length,
+            missingPages: parsed.missingPages
+          };
+
+          // HARD FAIL option (recommended in admin/testing):
+          // if pages are missing, fail ingestion so you notice immediately.
+          const FAIL_ON_MISSING_PAGES = process.env.FAIL_ON_MISSING_PAGES === 'true';
+          if (FAIL_ON_MISSING_PAGES && parsed.expectedPages && parsed.missingPages.length > 0) {
+            throw new Error(
+              `PDF extraction incomplete: expected ${parsed.expectedPages}, extracted ${parsed.extractedPages.length}. Missing pages: ${parsed.missingPages.slice(0, 50).join(', ')}`
+            );
+          }
         } else if (fileName.toLowerCase().endsWith('.docx')) {
           console.log('[PROCESS] Processing DOCX file');
           const fullTextArray = await parseDocx(fileBuffer);
@@ -1468,8 +1807,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         } else if (heuristicIsGlossary) {
           docType = 'glossary';
         } else {
-          const totalPages = blockData[blockData.length - 1]?.pageEnd ?? 1;
-          docType = totalPages >= 100 ? 'manual' : 'standard';
+          const maxPage = Math.max(...blockData.map(b => b.pageEnd), 0);
+          docType = maxPage >= 100 ? 'manual' : 'standard';
         }
 
         console.log(`[PROCESS] Effective docType: ${docType} (hint: ${docTypeHint || 'none'})`);
@@ -1500,6 +1839,71 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           console.log(`[PROCESS] Sample FAQ has ${faqChunks[0].links.length} links`);
         } else if (smartChunks.length > 0) {
           console.log(`[PROCESS] Average chunk size: ${Math.round(smartChunks.reduce((acc, c) => acc + c.text.length, 0) / smartChunks.length)} chars`);
+        }
+
+        // MANUALS ONLY: Upload chunks to R2 before embeddings
+        let manualDocId: string | undefined;
+        let manualChunkR2Keys: Map<number, string> | undefined;
+        
+        if (chunkResult.kind === 'standard' && chunkResult.strategy === 'manual') {
+          console.log('[MANUAL] Starting chunk upload to R2 for manual document');
+          manualDocId = generateDocId(pineconeNamespace, fileKey!, documentHash);
+          manualChunkR2Keys = new Map();
+          
+          const chunkManifestEntries: Array<{
+            chunkIndex: number;
+            chunkId: string;
+            pageStart: number;
+            pageEnd: number;
+            r2Key: string;
+          }> = [];
+          
+          // Upload each chunk to R2
+          for (let i = 0; i < smartChunks.length; i++) {
+            const chunk = smartChunks[i];
+            const chunkId = generateChunkId(manualDocId, i, chunk.hash);
+            
+            try {
+              const r2Key = await uploadChunkToR2(
+                pineconeNamespace,
+                manualDocId,
+                chunk,
+                i,
+                chunkId,
+                fileName!
+              );
+              
+              manualChunkR2Keys.set(i, r2Key);
+              chunkManifestEntries.push({
+                chunkIndex: i,
+                chunkId,
+                pageStart: chunk.pageStart,
+                pageEnd: chunk.pageEnd,
+                r2Key
+              });
+            } catch (error) {
+              console.error(`[MANUAL] Failed to upload chunk ${i} to R2:`, error);
+              throw new Error(`Failed to upload chunk ${i} to R2: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            }
+          }
+          
+          // Upload chunk manifest
+          try {
+            await uploadChunkManifestToR2(pineconeNamespace, manualDocId, {
+              docId: manualDocId,
+              source: fileName!,
+              fileKey: fileKey!,
+              namespace: pineconeNamespace,
+              documentHash,
+              documentType: 'manual',
+              chunkCount: smartChunks.length,
+              chunks: chunkManifestEntries
+            });
+            console.log('[MANUAL] Successfully uploaded all chunks and manifest to R2');
+          } catch (error) {
+            console.error('[MANUAL] Failed to upload chunk manifest to R2:', error);
+            throw new Error(`Failed to upload chunk manifest to R2: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          }
         }
 
         if (phase === 'embeddings') {
@@ -1681,6 +2085,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
                 const globalChunkIndex = b * EMBEDDING_BATCH_SIZE + i;
 
+                // MANUALS ONLY: Pass pointer info if this is a manual
+                const isManual = chunkResult.kind === 'standard' && chunkResult.strategy === 'manual';
+                const chunkR2Key = isManual && manualChunkR2Keys ? manualChunkR2Keys.get(globalChunkIndex) : undefined;
+                
                 vectors.push({
                   id: vectorId,
                   values: embedding,
@@ -1690,7 +2098,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                     fileKey!,
                     smartChunks.length,
                     globalChunkIndex,
-                    { strategy: chunkResult.kind === 'standard' ? chunkResult.strategy : 'standard' }
+                    {
+                      strategy: chunkResult.kind === 'standard' ? chunkResult.strategy : 'standard',
+                      // MANUALS ONLY: Include pointer info
+                      ...(isManual && manualDocId && chunkR2Key ? {
+                        docId: manualDocId,
+                        chunkId: generateChunkId(manualDocId, globalChunkIndex, chunk.hash),
+                        chunkTextR2Key: chunkR2Key
+                      } : {})
+                    }
                   )
                 });
               }
@@ -1769,7 +2185,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             namespace: pineconeNamespace,
             hash: documentHash,
             documentType: manifestDocType as 'faq' | 'glossary' | 'standard' | 'manual',
-            chunkCount: effectiveChunkCount
+            chunkCount: effectiveChunkCount,
+            ...(extractionInfo && {
+              extraction: {
+                expectedPages: extractionInfo.expectedPages,
+                extractedPages: extractionInfo.extractedPages,
+                missingPages: extractionInfo.missingPages.length
+              }
+            })
           };
 
           try {

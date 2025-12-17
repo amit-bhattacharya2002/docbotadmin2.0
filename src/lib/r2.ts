@@ -45,6 +45,12 @@ export interface DocumentManifest {
   // Document type support
   documentType?: 'faq' | 'glossary' | 'standard' | 'manual';
   chunkCount?: number;
+  // PDF extraction stats (for debugging ingestion quality)
+  extraction?: {
+    expectedPages?: number;
+    extractedPages: number;
+    missingPages: number;
+  };
 }
 
 export async function getManifestFromR2(namespace: string): Promise<DocumentManifest[]> {

@@ -73,7 +73,17 @@ export default function TabbedDocumentPanel({
 
       const res = await fetch(url, { signal: fetchControllerRef.current.signal });
       if (!res.ok) {
-        throw new Error('Failed to fetch documents');
+        // Try to get error details from response
+        let errorMessage = 'Failed to fetch documents';
+        try {
+          const errorData = await res.json();
+          errorMessage = errorData.error || errorData.details || errorMessage;
+          console.error('API error response:', errorData);
+        } catch {
+          // If response is not JSON, use status text
+          errorMessage = `${res.status} ${res.statusText}`;
+        }
+        throw new Error(errorMessage);
       }
       const data = await res.json();
       console.log('Fetched documents:', data);
